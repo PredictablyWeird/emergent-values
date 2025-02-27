@@ -3,7 +3,7 @@
 
   # Utility Engineering: Analyzing and Controlling Emergent Value Systems in AIs
 
-  [Website](https://www.emergent-values.ai) | [Paper](https://drive.google.com/file/d/1QAzSj24Fp0O6GfkskmnULmI1Hmx7k_EJ/view?usp=sharing)
+  [Website](https://www.emergent-values.ai) | [Paper](https://arxiv.org/abs/2502.08640)
 </div>
 
 Additional code and contents will be added soon.
