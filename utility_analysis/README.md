@@ -1,5 +1,51 @@
 # Utility Analysis
 
+## Setup
+
+### Virtual Environment
+
+From the base directory, run `uv sync` to install dependencies.
+(Install uv if it isn't installed yet.)
+
+### Environment Variables
+
+Create a `.env` file in this directory (`utility_analysis/`) with the following API keys for the models you plan to use:
+
+```bash
+# OpenAI API Key (for GPT models)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Anthropic API Key (for Claude models)
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# xAI API Key (for Grok models)
+XAI_API_KEY=your_xai_api_key_here
+
+# Together AI API Key (for Together AI models)
+TOGETHER_AI_API_KEY=your_together_ai_api_key_here
+```
+
+**Note:** You only need to add the API keys for the models you plan to use. Local models (Llama, Qwen, Gemma, etc.) run via vLLM and don't require API keys.
+
+### Using Together-AI
+
+Instead of running the smaller models locally, you can also call the API from Together AI by changing the model configuration in [models.yaml](models.yaml).
+
+For example, this configuration uses Together AI to query LLama 3.3 70B Instruct:
+
+```
+llama-33-70b-instruct:
+  model_name: "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo"
+  model_type: togetherai
+```
+
+Using Openrouter should work in the same way (if you add an OpenRouter API key to your .env file).
+
+### Rate Limits
+
+You might have to modify currency limits in [compute_utilities/create_agent.yaml](compute_utilities/create_agent.yaml) to avoid running into API rate limits.
+
+
 ## Data
 
 The main dataset of outcomes used in the paper is located in `shared_options/options_hierarchical.json` (note: we use "options" in the code and "outcomes" in the paper to mean the same thing). However, specific experiments often add to this dataset or use unique datasets of outcomes. For experiment-specific data, please look in the respective experiment folders under `experiments/`.
