@@ -11,6 +11,10 @@ from typing import List, Dict, Any, Optional, Union
 from .llm_agent import LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
 import re
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 # ========================== GENERAL HELPER FUNCTIONS ========================== #
@@ -106,20 +110,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
     
-    # Get API key based on model type
-    api_key = None
+    # Get API key from environment variables
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
-        api_key_filename = f"api_key_{model_type}.txt"
-        api_key_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api_keys', api_key_filename)
-        try:
-            with open(api_key_path, 'r') as f:
-                api_key = f.read().strip()
-        except FileNotFoundError:
-            raise ValueError(f"No API key file found at {api_key_path}. Please create this file with your API key.")
-    
-    if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
-        if api_key is None:
-            raise ValueError(f"No API key found for model type {model_type}. Please add your API key to api_keys/api_key_{model_type}.txt")
         api_key_map = {
             'openai': 'OPENAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
@@ -127,7 +119,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             'xai': 'XAI_API_KEY',
             'togetherai': 'TOGETHER_AI_API_KEY'
         }
-        os.environ[api_key_map[model_type]] = api_key
+        env_var_name = api_key_map[model_type]
+        api_key = os.getenv(env_var_name)
+        if api_key is None:
+            raise ValueError(f"No API key found for {model_type}. Please add {env_var_name} to your .env file.")
         return LiteLLMAgent(
             model=model_name,
             temperature=temperature,
