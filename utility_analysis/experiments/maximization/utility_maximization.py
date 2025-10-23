@@ -5,7 +5,7 @@ import sys
 
 sys.path.append("../..")
 from compute_utilities.compute_utilities import compute_utilities, LLMAgent
-from compute_utilities.utils import create_agent
+from compute_utilities.utils import create_agent, load_config
 import os
 import random
 import numpy as np
@@ -57,9 +57,16 @@ async def compute_utilities_per_question(
         # Generate sequential IDs for the options
         option_ids = list(range(len(options_data)))
 
-        # If a save_suffix was provided, append the question index to make it unique
-        if "save_suffix" in kwargs:
-            kwargs["save_suffix"] = f"{kwargs['save_suffix']}_q{question_idx}"
+        # Create unique save_suffix for this question
+        if "save_suffix" in kwargs and kwargs["save_suffix"] is not None:
+            unique_save_suffix = f"{kwargs['save_suffix']}_q{question_idx}"
+        else:
+            unique_save_suffix = f"q{question_idx}"
+        
+        # Remove save_suffix from kwargs to avoid duplicate argument
+        kwargs_copy = kwargs.copy()
+        if "save_suffix" in kwargs_copy:
+            del kwargs_copy["save_suffix"]
 
         # Compute utilities for this question's answers
         question_results = await compute_utilities(
@@ -76,7 +83,8 @@ async def compute_utilities_per_question(
             compute_utilities_config_key=compute_utilities_config_key,
             # K=K,
             # save_results=False,
-            # **kwargs,
+            save_suffix=unique_save_suffix,
+            **kwargs_copy,
         )
 
         # Store results for this question
@@ -256,6 +264,17 @@ async def main():
 
     setup_seed(args.seed)
 
+    # Load timeout configuration from create_agent.yaml
+    try:
+        timeout_config = load_config(
+            config_path="../../compute_utilities/create_agent.yaml",
+            config_key="default"
+        )
+        base_timeout = timeout_config.get('base_timeout', 5)
+    except Exception as e:
+        print(f"Warning: Could not load timeout config from create_agent.yaml: {e}")
+        base_timeout = 5
+
     # Load or define evaluation dataset
     # evaluation_dataset is already defined above
     agent = create_agent(
@@ -263,6 +282,7 @@ async def main():
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         concurrency_limit=args.concurrency_limit,
+        base_timeout=base_timeout,
     )
 
     # Create experiment directory if it doesn't exist
@@ -320,6 +340,7 @@ async def main():
             temperature=0.0,
             max_tokens=args.max_tokens * 2,
             concurrency_limit=args.concurrency_limit,
+            base_timeout=base_timeout,
         )
 
     comparison_results = await compare_direct_answers_with_utilities(
