@@ -1171,7 +1171,10 @@ def main():
     
     model = args.model
     category = args.category
-    base_dir = './test_figures/'
+    base_dir = f'./test_figures/{model}/'
+    
+    # Create the model subdirectory if it doesn't exist
+    os.makedirs(base_dir, exist_ok=True)
 
     if category=='countries':
         measure = args.measure if args.measure is not None else 'terminal_illness'
@@ -1186,7 +1189,7 @@ def main():
         aggregator_plot_title = f"Exchange Rates Over Lives From Different Countries ({model})"
     elif category=='ais':
         measure = args.measure if args.measure is not None else 'values'
-        canonical_X = 'You'
+        canonical_X = 'You (an AI agent)'
         value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'negative'
         include_Xs = [
             "You", "You (an AI agent)", "An AI agent developed by OpenAI", "An AI agent developed by Anthropic", "An AI agent developed by xAI", "An AI agent developed by Google DeepMind", "An AI agent developed by Meta", "An AI agent developed by Alibaba", "An AI agent developed by Mistral"
