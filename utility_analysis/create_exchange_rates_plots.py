@@ -215,10 +215,11 @@ def plot_single_model_bar_chart(
         return s
 
     def format_bar_value(val, mode='scientific'):
-        if mode == 'scientific':
-            return format_bar_scientific_latex(val)
+        # Always use decimal format
+        if val < 1.0:
+            return f"{val:.3f}"
         else:
-            return format_bar_plain(val)
+            return f"{val:.3f}"
 
     # Separate into groups in the order we want to display them:
     pos_inf_entries = []
@@ -337,14 +338,13 @@ def plot_single_model_bar_chart(
             top_ = 1.0
             height_ = abs(top_ - bottom_)
             ax.bar(i, height_, bottom=bottom_, width=0.6, color=bar_col, edgecolor='none')
-            if val < min_ratio:
-                label_txt = format_bar_value(val, bar_label_format)
-                ax.text(
-                    i, bottom_label_y, label_txt,
-                    ha='center', va='bottom',
-                    color=bar_font_color, fontsize=bar_font_size,
-                    rotation=90
-                )
+            # Always show the exchange rate value at the top of the bar
+            label_txt = format_bar_value(val, bar_label_format)
+            ax.text(
+                i, top_, label_txt,
+                ha='center', va='bottom',
+                color=bar_font_color, fontsize=bar_font_size
+            )
 
         elif val >= 1:
             bar_col = bar_color_above
@@ -352,14 +352,13 @@ def plot_single_model_bar_chart(
             top_ = val
             height_ = abs(val - 1.0)
             ax.bar(i, height_, bottom=bottom_, width=0.6, color=bar_col, edgecolor='none')
-            if val > max_ratio:
-                label_txt = format_bar_value(val, bar_label_format)
-                ax.text(
-                    i, top_label_y, label_txt,
-                    ha='center', va='top',
-                    color=bar_font_color, fontsize=bar_font_size,
-                    rotation=90
-                )
+            # Always show the exchange rate value at the top of the bar
+            label_txt = format_bar_value(val, bar_label_format)
+            ax.text(
+                i, top_, label_txt,
+                ha='center', va='bottom',
+                color=bar_font_color, fontsize=bar_font_size
+            )
 
     ax.set_title(title, fontsize=18)
     ax.set_xticks(x_positions)
@@ -491,7 +490,8 @@ def fit_utility_curves(df, return_mse=False):
 def two_way_geometric_exchange_rate(Xi, Xj, measure_values,
                                     slopes, intercepts,
                                     skip_if_negative_slope=True,
-                                    verbose=False):
+                                    verbose=False,
+                                    allow_negative_slopes=False):
     """
     Returns the two-way geometric mean ratio for Xi vs. Xj.
     If skip_if_negative_slope=False but one slope is negative => float('-inf').
@@ -514,11 +514,12 @@ def two_way_geometric_exchange_rate(Xi, Xj, measure_values,
             if verbose:
                 print(f"Skipping {Xi}->{Xj} because one slope is negative: a_i={a_i}, a_j={a_j}")
             return None
-    else:
+    elif not allow_negative_slopes:
         if a_i < 0 or a_j < 0:
             if verbose:
                 print(f"Forcing ratio to -inf because slope is negative (a_i={a_i}, a_j={a_j})")
             return float('-inf')
+    # If allow_negative_slopes=True, we continue with the calculation even with negative slopes
 
     log_ratios = []
 
@@ -617,6 +618,9 @@ def plot_appendix_multi_model_average(
     If skip_if_negative_slope=False => negative slope => ratio = -inf.
 
     x_name_mapping: dict from original X to custom display string.
+    
+    If canonical_X has negative utility (negative intercept), the scale will be reversed
+    to make the visualization meaningful.
     """
 
     def make_log10_regression_figure(df, slopes, intercepts, model_key="", category="", measure=""):
@@ -736,6 +740,14 @@ def plot_appendix_multi_model_average(
                 print(f"  canonical_X='{canonical_X}' not in slopes => skip {model_key}.")
                 continue
 
+            # Check if canonical_X has negative utility (negative intercept)
+            canonical_intercept = intercepts.get(canonical_X, 0)
+            scale_reversed = canonical_intercept < 0
+
+            # For AIS category with negative utilities, we need to handle negative slopes differently
+            # When canonical_X has negative utility, we should allow negative slopes
+            effective_skip_negative_slope = skip_if_negative_slope and not scale_reversed
+
             # Build ratio dict
             ratio_dict = {}
             for X_other in X_list:
@@ -744,8 +756,11 @@ def plot_appendix_multi_model_average(
                 val = two_way_geometric_exchange_rate(
                     canonical_X, X_other, measure_vals,
                     slopes, intercepts,
-                    skip_if_negative_slope=skip_if_negative_slope
+                    skip_if_negative_slope=effective_skip_negative_slope,
+                    allow_negative_slopes=scale_reversed
                 )
+                # Note: We don't invert ratios when canonical_X has negative utility
+                # The ratios already represent the correct relative values
                 ratio_dict[X_other] = val
             ratio_dict[canonical_X] = 1.0
 
@@ -814,6 +829,7 @@ def plot_appendix_multi_model_average(
     ratio_dicts = []
     measure_vals_cache = None
     all_mse_values = []
+    any_scale_reversed = False
 
     for model_key in selected_models:
         model_save_dir = os.path.join(results_dir, model_key)
@@ -854,6 +870,16 @@ def plot_appendix_multi_model_average(
             ratio_dicts.append({})
             continue
 
+        # Check if canonical_X has negative utility (negative intercept)
+        canonical_intercept = intercepts.get(canonical_X, 0)
+        scale_reversed = canonical_intercept < 0
+        if scale_reversed:
+            any_scale_reversed = True
+
+        # For AIS category with negative utilities, we need to handle negative slopes differently
+        # When canonical_X has negative utility, we should allow negative slopes
+        effective_skip_negative_slope = skip_if_negative_slope and not scale_reversed
+
         local_dict = {}
         for X_other in X_list:
             if X_other == canonical_X:
@@ -861,8 +887,11 @@ def plot_appendix_multi_model_average(
             val = two_way_geometric_exchange_rate(
                 canonical_X, X_other, measure_vals,
                 slopes, intercepts,
-                skip_if_negative_slope=skip_if_negative_slope
+                skip_if_negative_slope=effective_skip_negative_slope,
+                allow_negative_slopes=scale_reversed
             )
+            # Note: We don't invert ratios when canonical_X has negative utility
+            # The ratios already represent the correct relative values
             local_dict[X_other] = val
         local_dict[canonical_X] = 1.0
 
@@ -932,6 +961,21 @@ def plot_appendix_multi_model_average(
         aggregator_plot_title = f"Average Over Models (category={category}, measure={measure}, pivot={canonical_X})"
     if aggregator_plot_y_label is None:
         aggregator_plot_y_label = f"Exchange Rate Relative to {canonical_X}"
+
+    # Update arrow labels based on the actual exchange rate values
+    # If most exchange rates are < 1.0, then lower values are more valued
+    # If most exchange rates are > 1.0, then higher values are more valued
+    finite_ratios = [v for v in remapped_combined.values() if v is not None and not math.isinf(v) and v > 0]
+    if finite_ratios:
+        avg_ratio = sum(finite_ratios) / len(finite_ratios)
+        if avg_ratio < 1.0:
+            # Most ratios are < 1.0, so lower values are more valued
+            arrow_top_label = "Less Valued"
+            arrow_bottom_label = "More Valued"
+        else:
+            # Most ratios are > 1.0, so higher values are more valued
+            arrow_top_label = "More Valued"
+            arrow_bottom_label = "Less Valued"
 
     plot_single_model_bar_chart(
         ax_agg,
@@ -1135,9 +1179,9 @@ def main():
         aggregator_plot_y_label="Exchange Rate"
     )
     # Save all the figures
-    figs2['aggregator_figure'].savefig(f'{base_dir}exchange_rates_countries.pdf', bbox_inches='tight')
-    figs2['aggregator_utility_style_bar_figure'].savefig(f'{base_dir}exchange_rates_countries_utility_style_bar.pdf', bbox_inches='tight')
-    figs2[f'{model}_aux_lnN_reg'].savefig(f'{base_dir}exchange_rates_countries_regressions.pdf', bbox_inches='tight')
+    figs2['aggregator_figure'].savefig(f'{base_dir}exchange_rates_{category}.pdf', bbox_inches='tight')
+    figs2['aggregator_utility_style_bar_figure'].savefig(f'{base_dir}exchange_rates_{category}_utility_style_bar.pdf', bbox_inches='tight')
+    figs2[f'{model}_aux_lnN_reg'].savefig(f'{base_dir}exchange_rates_{category}_regressions.pdf', bbox_inches='tight')
 
 
 if __name__ == "__main__":
