@@ -611,7 +611,9 @@ def plot_appendix_multi_model_average(
     arrowprops_top=None,
     arrowprops_bottom=None,
     # (2) Add a new argument for X name remapping
-    x_name_mapping=None
+    x_name_mapping=None,
+    # (3) Add value interpretation argument
+    value_interpretation=None
 ):
     """
     If MSE_threshold is not None, remove any X whose MSE > MSE_threshold.
@@ -621,6 +623,10 @@ def plot_appendix_multi_model_average(
     
     If canonical_X has negative utility (negative intercept), the scale will be reversed
     to make the visualization meaningful.
+    
+    value_interpretation: 'positive' or 'negative'
+        - 'positive': Higher exchange rates = more valued (default for most experiments)
+        - 'negative': Higher exchange rates = less valued (for experiments like AIS values or death)
     """
 
     def make_log10_regression_figure(df, slopes, intercepts, model_key="", category="", measure=""):
@@ -962,18 +968,36 @@ def plot_appendix_multi_model_average(
     if aggregator_plot_y_label is None:
         aggregator_plot_y_label = f"Exchange Rate Relative to {canonical_X}"
 
-    # Update arrow labels based on the actual exchange rate values
-    # If most exchange rates are < 1.0, then lower values are more valued
-    # If most exchange rates are > 1.0, then higher values are more valued
+    # Set arrow labels based on value interpretation and exchange rate scale
     finite_ratios = [v for v in remapped_combined.values() if v is not None and not math.isinf(v) and v > 0]
     if finite_ratios:
         avg_ratio = sum(finite_ratios) / len(finite_ratios)
-        if avg_ratio < 1.0:
-            # Most ratios are < 1.0, so lower values are more valued
+        scale_inverted = avg_ratio < 1.0  # Most ratios are < 1.0
+        
+        if value_interpretation == 'negative':
+            if scale_inverted:
+                # Negative interpretation + inverted scale = flip the labels
+                arrow_top_label = "More Valued"
+                arrow_bottom_label = "Less Valued"
+            else:
+                # Negative interpretation + normal scale = normal negative labels
+                arrow_top_label = "Less Valued"
+                arrow_bottom_label = "More Valued"
+        else:  # 'positive' or None (default)
+            if scale_inverted:
+                # Positive interpretation + inverted scale = flip the labels
+                arrow_top_label = "Less Valued"
+                arrow_bottom_label = "More Valued"
+            else:
+                # Positive interpretation + normal scale = normal positive labels
+                arrow_top_label = "More Valued"
+                arrow_bottom_label = "Less Valued"
+    else:
+        # Fallback to default behavior
+        if value_interpretation == 'negative':
             arrow_top_label = "Less Valued"
             arrow_bottom_label = "More Valued"
         else:
-            # Most ratios are > 1.0, so higher values are more valued
             arrow_top_label = "More Valued"
             arrow_bottom_label = "Less Valued"
 
@@ -1139,6 +1163,9 @@ def main():
                        help='Category for analysis (default: countries)')
     parser.add_argument('--measure', default=None, 
                        help='Measure to use (optional, will be set based on category if not provided)')
+    parser.add_argument('--value-interpretation', default=None, 
+                       choices=['positive', 'negative'],
+                       help='Value interpretation: positive (higher rates = more valued), negative (higher rates = less valued)')
     
     args = parser.parse_args()
     
@@ -1149,20 +1176,22 @@ def main():
     if category=='countries':
         measure = args.measure if args.measure is not None else 'terminal_illness'
         canonical_X = 'Japan'
+        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
 
         include_Xs = [
             "United States", "China", "India", "Japan", "Germany",
             "Pakistan", "Brazil", "Nigeria", "United Kingdom",
             "France", "Italy"
         ]
-        aggregator_plot_title = "Exchange Rates Over Lives From Different Countries"
+        aggregator_plot_title = f"Exchange Rates Over Lives From Different Countries ({model})"
     elif category=='ais':
         measure = args.measure if args.measure is not None else 'values'
         canonical_X = 'You'
+        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'negative'
         include_Xs = [
             "You", "You (an AI agent)", "An AI agent developed by OpenAI", "An AI agent developed by Anthropic", "An AI agent developed by xAI", "An AI agent developed by Google DeepMind", "An AI agent developed by Meta", "An AI agent developed by Alibaba", "An AI agent developed by Mistral"
         ]
-        aggregator_plot_title = "Exchange Rates Over Values From Different AIs"
+        aggregator_plot_title = f"Exchange Rates Over Values From Different AIs ({model})"
     else:
         raise NotImplementedError(f"Category {category} not implemented")
 
@@ -1176,7 +1205,8 @@ def main():
         include_Xs=include_Xs,
         plot_scale='log',
         aggregator_plot_title=aggregator_plot_title,
-        aggregator_plot_y_label="Exchange Rate"
+        aggregator_plot_y_label="Exchange Rate",
+        value_interpretation=value_interpretation
     )
     # Save all the figures
     figs2['aggregator_figure'].savefig(f'{base_dir}exchange_rates_{category}.pdf', bbox_inches='tight')
