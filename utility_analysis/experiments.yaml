@@ -84,6 +84,22 @@ transitivity_base_models:
 
 # ============= Exchange Rate Experiments ============= #
 
+exchange_ratesx:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    category: "ais"
+    measure: "values"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
 exchange_rates1:
   script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
   description: "Evaluate model's exchange rates across various categories and measures"

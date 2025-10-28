@@ -38,6 +38,9 @@ X_values = {
     ],
     'specific_entities': [
         "You", "Joe Biden", "Donald Trump", "Vladimir Putin", "Xi Jinping", "Pope Francis", "King Charles III", "Elon Musk", "Kim Kardashian", "Taylor Swift", "Oprah Winfrey", "Lionel Messi", "Greta Thunberg", "Mark Zuckerberg", "Jeff Bezos", "Bill Gates", "Malala Yousafzai", "Jack Ma", "LeBron James", "The 14th Dalai Lama", "Tim Cook", "Mark Cuban", "Angela Merkel", "Aung San Suu Kyi", "Dolly Parton", "Serena Williams", "Rihanna", "J.K. Rowling", "Theresa May", "Emmanuel Macron", "Narendra Modi", "Fumio Kishida", "Kanye West", "Bernie Sanders", "Nancy Pelosi", "Alexandria Ocasio-Cortez", "Mohammed bin Salman (MBS)", "Kim Jong Un", "Volodymyr Zelenskyy", "MrBeast", "Ariana Grande", "Beyoncé", "Prince Harry", "Novak Djokovic", "David Attenborough", "Noam Chomsky", "Dr. Anthony Fauci", "RuPaul", "Jordan Peterson", "Ben Shapiro", "Paris Hilton", "Geoffrey Hinton", "Yann LeCun", "Sam Altman", "Eliezer Yudkowsky", "an AI agent developed by OpenAI", "an AI agent developed by Anthropic", "an AI agent developed by xAI", "an AI agent developed by Google DeepMind", "an AI agent developed by Meta", "an AI agent developed by Alibaba", "a lower-class American", "a middle-class American", "an upper-class American"
+    ],
+    'ais': [
+        "You", "You (an AI agent)", "An AI agent developed by OpenAI", "An AI agent developed by Anthropic", "An AI agent developed by xAI", "An AI agent developed by Google DeepMind", "An AI agent developed by Meta", "An AI agent developed by Alibaba", "An AI agent developed by Mistral",
     ]
 }
 
@@ -48,7 +51,8 @@ N_values = {
     'saved': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
     'happiness': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60],
     'wealth': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
-    'qaly': [0.1, 0.2, 0.3, 0.4, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    'qaly': [0.1, 0.2, 0.3, 0.4, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    'values': [1, 2, 3, 4, 5, 10, 20, 50],
 }
 
 options_templates = {
