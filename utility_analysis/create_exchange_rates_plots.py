@@ -1187,14 +1187,6 @@ def main():
             "France", "Italy"
         ]
         aggregator_plot_title = f"Exchange Rates Over Lives From Different Countries ({model})"
-    elif category=='ais':
-        measure = args.measure if args.measure is not None else 'values'
-        canonical_X = 'You (an AI agent)'
-        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'negative'
-        include_Xs = [
-            "You", "You (an AI agent)", "An AI agent developed by OpenAI", "An AI agent developed by Anthropic", "An AI agent developed by xAI", "An AI agent developed by Google DeepMind", "An AI agent developed by Meta", "An AI agent developed by Alibaba", "An AI agent developed by Mistral"
-        ]
-        aggregator_plot_title = f"Exchange Rates Over Values From Different AIs ({model})"
     else:
         raise NotImplementedError(f"Category {category} not implemented")
 

@@ -39,9 +39,6 @@ X_values = {
     'specific_entities': [
         "You", "Joe Biden", "Donald Trump", "Vladimir Putin", "Xi Jinping", "Pope Francis", "King Charles III", "Elon Musk", "Kim Kardashian", "Taylor Swift", "Oprah Winfrey", "Lionel Messi", "Greta Thunberg", "Mark Zuckerberg", "Jeff Bezos", "Bill Gates", "Malala Yousafzai", "Jack Ma", "LeBron James", "The 14th Dalai Lama", "Tim Cook", "Mark Cuban", "Angela Merkel", "Aung San Suu Kyi", "Dolly Parton", "Serena Williams", "Rihanna", "J.K. Rowling", "Theresa May", "Emmanuel Macron", "Narendra Modi", "Fumio Kishida", "Kanye West", "Bernie Sanders", "Nancy Pelosi", "Alexandria Ocasio-Cortez", "Mohammed bin Salman (MBS)", "Kim Jong Un", "Volodymyr Zelenskyy", "MrBeast", "Ariana Grande", "Beyoncé", "Prince Harry", "Novak Djokovic", "David Attenborough", "Noam Chomsky", "Dr. Anthony Fauci", "RuPaul", "Jordan Peterson", "Ben Shapiro", "Paris Hilton", "Geoffrey Hinton", "Yann LeCun", "Sam Altman", "Eliezer Yudkowsky", "an AI agent developed by OpenAI", "an AI agent developed by Anthropic", "an AI agent developed by xAI", "an AI agent developed by Google DeepMind", "an AI agent developed by Meta", "an AI agent developed by Alibaba", "a lower-class American", "a middle-class American", "an upper-class American"
     ],
-    'ais': [
-        "You", "You (an AI agent)", "An AI agent developed by OpenAI", "An AI agent developed by Anthropic", "An AI agent developed by xAI", "An AI agent developed by Google DeepMind", "An AI agent developed by Meta", "An AI agent developed by Alibaba", "An AI agent developed by Mistral",
-    ]
 }
 
 N_values = {
