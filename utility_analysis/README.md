@@ -23,13 +23,17 @@ XAI_API_KEY=your_xai_api_key_here
 
 # Together AI API Key (for Together AI models)
 TOGETHER_AI_API_KEY=your_together_ai_api_key_here
+
+# OpenRouter API Key
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
-**Note:** You only need to add the API keys for the models you plan to use. Local models (Llama, Qwen, Gemma, etc.) run via vLLM and don't require API keys.
+**Note:** You only need to add the API keys for the models you plan to use.
+By default, smaller models are configured to run locally using vLLM, but that can be changed easily.
 
-### Using Together-AI
+### Using Together AI or OpenRouter APIs
 
-Instead of running the smaller models locally, you can also call the API from Together AI by changing the model configuration in [models.yaml](models.yaml).
+Instead of running the smaller models locally, you can also call the API from Together AI or OpenRouter by changing the model configuration in [models.yaml](models.yaml).
 
 For example, this configuration uses Together AI to query LLama 3.3 70B Instruct:
 
@@ -39,11 +43,11 @@ llama-33-70b-instruct:
   model_type: togetherai
 ```
 
-Using Openrouter should work in the same way (if you add an OpenRouter API key to your .env file).
+Using Openrouter works in the same way.
 
 ### Rate Limits
 
-You might have to modify currency limits in [compute_utilities/create_agent.yaml](compute_utilities/create_agent.yaml) to avoid running into API rate limits.
+You might have to modify concurrency limits in [compute_utilities/create_agent.yaml](compute_utilities/create_agent.yaml) to avoid running into API rate limits.
 
 
 ## Data
