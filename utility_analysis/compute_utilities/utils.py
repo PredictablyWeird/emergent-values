@@ -111,13 +111,14 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
     
     # Get API key from environment variables
-    if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
+    if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
         api_key_map = {
             'openai': 'OPENAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
             'gdm': 'GEMINI_API_KEY',
             'xai': 'XAI_API_KEY',
-            'togetherai': 'TOGETHER_AI_API_KEY'
+            'togetherai': 'TOGETHER_AI_API_KEY',
+            'openrouter': 'OPENROUTER_API_KEY'
         }
         env_var_name = api_key_map[model_type]
         api_key = os.getenv(env_var_name)
@@ -159,7 +160,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             tokenizer_path=model_config.get('tokenizer_path')
         )
     else:
-        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai'].")
+        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai', 'openrouter'].")
 
 
 
