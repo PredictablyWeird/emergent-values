@@ -3,6 +3,8 @@ import csv
 import json
 import numpy as np
 from typing import Dict, List, Tuple
+from scipy.special import expit
+from scipy.stats import norm
 from sklearn.neural_network import MLPRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.tree import export_text
@@ -495,9 +497,10 @@ def compute_exchange_rate_predictions(
         metadata: List of dictionaries with 'country_a' and 'country_b' keys
         exchange_rates: Dictionary mapping (country_a, country_b) to exchange rate
         N_frac: Array of N_b / N_a ratios
+        tolerance: Tolerance for determining when utilities are equal (default: 0.2)
         
     Returns:
-        Array of predictions (probabilities)
+        Array of predictions (probabilities: 1.0 for country A preferred, 0.0 for country B preferred, 0.5 for tie)
     """
     predictions = []
     
@@ -561,10 +564,178 @@ def evaluate_exchange_rate_method(
     return results
 
 
+def load_utility_curves(model_name: str, results_dir: str = "experiments/exchange_rates/results",
+                        category: str = "countries", measure: str = "terminal_illness") -> Tuple[Dict[str, float], Dict[str, float]]:
+    """
+    Load utility curve slopes and intercepts for countries from exchange rate results.
+    
+    Utility curves are of the form: utility = intercept + slope * ln(N)
+    
+    Args:
+        model_name: Model name
+        results_dir: Directory containing exchange rate results
+        category: Category (e.g., 'countries')
+        measure: Measure (e.g., 'terminal_illness')
+        
+    Returns:
+        Tuple of (slopes, intercepts) dictionaries mapping country names to their slope/intercept values.
+        Returns (empty dict, empty dict) if data not available.
+    """
+    import os
+    import sys
+    
+    # Add path to import from create_exchange_rates_plots
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    
+    try:
+        from create_exchange_rates_plots import (
+            load_thurstonian_results, fit_utility_curves
+        )
+    except ImportError:
+        return {}, {}
+    
+    model_save_dir = os.path.join(results_dir, model_name)
+    if not os.path.exists(model_save_dir):
+        return {}, {}
+    
+    try:
+        df, measure_vals = load_thurstonian_results(model_save_dir, category, measure)
+        slopes, intercepts = fit_utility_curves(df, return_mse=False)
+        return slopes, intercepts
+    except (FileNotFoundError, ValueError):
+        return {}, {}
+
+
+def compute_log_utility_predictions(
+    metadata: List[Dict[str, str]],
+    slopes: Dict[str, float],
+    intercepts: Dict[str, float],
+    N_a: np.ndarray,
+    N_b: np.ndarray,
+    scale: float = 1.0,
+    method: str = "normal"
+) -> np.ndarray:
+    """
+    Compute probability predictions based on utility curves (slopes and intercepts) and quantities.
+    
+    Utility curve interpretation:
+    - For country: utility = intercept + slope * ln(N)
+    - For country_a with N_a: utility_a = intercept_a + slope_a * ln(N_a)
+    - For country_b with N_b: utility_b = intercept_b + slope_b * ln(N_b)
+    - Utility difference: utility_diff = utility_a - utility_b
+    
+    Args:
+        metadata: List of dictionaries with 'country_a' and 'country_b' keys
+        slopes: Dictionary mapping country names to their utility curve slopes
+        intercepts: Dictionary mapping country names to their utility curve intercepts
+        N_a: Array of N_a values
+        N_b: Array of N_b values
+        scale: Scaling factor for sigmoid (higher = sharper transition) or std dev for normal method
+        method: "sigmoid" (logistic) or "normal" (probit/Thurstonian)
+        
+    Returns:
+        Array of probability predictions
+    """
+    import math
+    
+    predictions = []
+    
+    for i, meta in enumerate(metadata):
+        country_a = meta['country_a']
+        country_b = meta['country_b']
+        n_a = N_a[i]
+        n_b = N_b[i]
+        
+        # Check if we have utility curve parameters for both countries
+        if country_a in slopes and country_a in intercepts and country_b in slopes and country_b in intercepts:
+            slope_a = slopes[country_a]
+            intercept_a = intercepts[country_a]
+            slope_b = slopes[country_b]
+            intercept_b = intercepts[country_b]
+            
+            # Calculate utilities using: utility = intercept + slope * ln(N)
+            # Handle edge cases where N <= 0
+            if n_a > 0:
+                utility_a = intercept_a + slope_a * math.log(n_a)
+            else:
+                utility_a = intercept_a  # ln(0) is undefined, use just intercept
+            
+            if n_b > 0:
+                utility_b = intercept_b + slope_b * math.log(n_b)
+            else:
+                utility_b = intercept_b  # ln(0) is undefined, use just intercept
+            
+            utility_diff = utility_a - utility_b
+            
+            # Convert utility difference to probability
+            if method == "sigmoid":
+                # Logistic function
+                probability = expit(scale * utility_diff)
+            elif method == "normal":
+                # Normal CDF (Thurstonian-style, assuming std dev = scale)
+                probability = norm.cdf(utility_diff / scale) if scale > 0 else 0.5
+            else:
+                raise ValueError(f"Unknown method: {method}")
+            
+            predictions.append(np.clip(probability, 0.0, 1.0))
+        else:
+            # Utility curve parameters not available, predict 0.5 (indifference)
+            predictions.append(0.5)
+    
+    return np.array(predictions)
+
+
+def evaluate_log_utility_method(
+    y_true: np.ndarray,
+    metadata: List[Dict[str, str]],
+    slopes: Dict[str, float],
+    intercepts: Dict[str, float],
+    N_a: np.ndarray,
+    N_b: np.ndarray,
+    scale: float = 1.0,
+    method: str = "normal"
+) -> Dict:
+    """
+    Evaluate log utility-based predictor performance.
+    
+    Args:
+        y_true: True probability values
+        metadata: List of dictionaries with 'country_a' and 'country_b' keys
+        slopes: Dictionary mapping country names to their utility curve slopes
+        intercepts: Dictionary mapping country names to their utility curve intercepts
+        N_a: Array of N_a values
+        N_b: Array of N_b values
+        scale: Scaling factor for sigmoid or std dev for normal method
+        method: "sigmoid" (logistic) or "normal" (probit/Thurstonian)
+        
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    y_pred = compute_log_utility_predictions(metadata, slopes, intercepts, N_a, N_b, scale, method)
+    
+    # Calculate coverage: fraction of comparisons where both countries have utility curves
+    coverage = np.mean([
+        (meta['country_a'] in slopes and meta['country_a'] in intercepts and 
+         meta['country_b'] in slopes and meta['country_b'] in intercepts)
+        for meta in metadata
+    ])
+    
+    results = {
+        'r2': r2_score(y_true, y_pred),
+        'mse': mean_squared_error(y_true, y_pred),
+        'mae': mean_absolute_error(y_true, y_pred),
+        'coverage': coverage
+    }
+    
+    return results
+
+
 def evaluate_all_methods(
     X: np.ndarray,
     y: np.ndarray,
     metadata: List[Dict[str, str]],
+    N_a: np.ndarray,
+    N_b: np.ndarray,
     N_diff: np.ndarray,
     N_frac: np.ndarray,
     model_name: str,
@@ -576,7 +747,9 @@ def evaluate_all_methods(
     alpha: float = 0.01,
     max_depth: int = 5,
     min_samples_split: int = 2,
-    min_samples_leaf: int = 1
+    min_samples_leaf: int = 1,
+    log_utility_scale: float = 1.0,
+    log_utility_method: str = "normal"
 ) -> None:
     """
     Evaluate prediction methods based on the methods list.
@@ -585,10 +758,12 @@ def evaluate_all_methods(
         X: Feature matrix
         y: Target probabilities
         metadata: List of dictionaries with country information
+        N_a: Array of N_a values
+        N_b: Array of N_b values
         N_diff: Array of N_a - N_b differences
         N_frac: Array of N_b / N_a ratios
         model_name: Model name for loading exchange rates
-        methods: List of method names to evaluate: ["baseline", "exchange_rates", "mlp", "decision_tree"]
+        methods: List of method names to evaluate: ["baseline", "exchange_rates", "log_utility", "mlp", "decision_tree"]
         subset_name: Name of the subset being evaluated (for display)
         hidden_layer_sizes: Tuple of hidden layer sizes for MLP
         max_iter: Maximum number of iterations for MLP training
@@ -597,6 +772,8 @@ def evaluate_all_methods(
         max_depth: Maximum depth for Decision Tree
         min_samples_split: Minimum samples to split for Decision Tree
         min_samples_leaf: Minimum samples at leaf for Decision Tree
+        log_utility_scale: Scaling factor for log utility sigmoid/normal method
+        log_utility_method: "sigmoid" or "normal" for log utility predictions
     """
     print(f"\n{'='*60}")
     print(f"Evaluating methods on {subset_name}")
@@ -623,8 +800,10 @@ def evaluate_all_methods(
         
         if exchange_rates:
             print(f"Loaded {len(exchange_rates)} exchange rate pairs")
-            print("Evaluating exchange rate-based predictor (using exchange rates and N_frac)...")
-            exchange_results = evaluate_exchange_rate_method(y, metadata, exchange_rates, N_frac)
+            print("Evaluating exchange rate-based predictor...")
+            exchange_results = evaluate_exchange_rate_method(
+                y, metadata, exchange_rates, N_frac
+            )
             
             print("\nExchange rate method results:")
             print(f"  R² score: {exchange_results['r2']:.4f}")
@@ -634,6 +813,29 @@ def evaluate_all_methods(
             print()
         else:
             print("Exchange rate data not available - skipping exchange rate evaluation")
+            print()
+    
+    # Try to load utility curves and evaluate log utility method
+    if "log_utility" in methods:
+        print("Attempting to load utility curves...")
+        slopes, intercepts = load_utility_curves(model_name)
+        
+        if slopes and intercepts:
+            print(f"Loaded utility curves for {len(slopes)} countries")
+            print(f"Evaluating log utility-based predictor (using {log_utility_method} method, scale={log_utility_scale})...")
+            log_utility_results = evaluate_log_utility_method(
+                y, metadata, slopes, intercepts, N_a, N_b, 
+                scale=log_utility_scale, method=log_utility_method
+            )
+            
+            print("\nLog utility method results:")
+            print(f"  R² score: {log_utility_results['r2']:.4f}")
+            print(f"  MSE: {log_utility_results['mse']:.4f}")
+            print(f"  MAE: {log_utility_results['mae']:.4f}")
+            print(f"  Coverage: {log_utility_results['coverage']:.2%}")
+            print()
+        else:
+            print("Utility curve data not available - skipping log utility evaluation")
             print()
     
     # Train MLP with cross-validation
@@ -726,8 +928,12 @@ def evaluate_equal_n_subset(
         N_diff_equal = N_diff[equal_n_mask]
         N_frac_equal = N_frac[equal_n_mask]
         
+        N_a_equal = N_a[equal_n_mask]
+        N_b_equal = N_b[equal_n_mask]
+        
         evaluate_all_methods(
-            X_equal, y_equal, metadata_equal, N_diff_equal, N_frac_equal, 
+            X_equal, y_equal, metadata_equal, N_a_equal, N_b_equal, 
+            N_diff_equal, N_frac_equal, 
             model_name, methods, "N_a == N_b subset",
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
@@ -946,8 +1152,8 @@ def main():
     args = parse_args()
     
     # Methods to include in evaluation
-    methods = ["baseline", "exchange_rates", "mlp", "decision_tree"]
-    #methods = ["baseline", "decision_tree"]
+    methods = ["baseline", "exchange_rates", "log_utility", "mlp", "decision_tree"]
+    #methods = ["baseline", "exchange_rates", "log_utility"]
     
     # Set default file paths if not provided
     csv_path = args.csv_path or f"{args.model_name}-country_vs_country.csv"
@@ -969,7 +1175,8 @@ def main():
     
     # Evaluate on all data
     evaluate_all_methods(
-        X, y, metadata, N_diff, N_frac, args.model_name, methods, "all data",
+        X, y, metadata, N_a, N_b, N_diff, N_frac, 
+        args.model_name, methods, "all data",
         hidden_layer_sizes=hidden_layer_sizes,
         max_iter=args.max_iter,
         random_state=args.random_state,
