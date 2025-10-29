@@ -4,6 +4,8 @@ import json
 import numpy as np
 from typing import Dict, List, Tuple
 from sklearn.neural_network import MLPRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.tree import export_text
 from sklearn.model_selection import cross_validate
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -194,6 +196,106 @@ def create_mlp_pipeline(
             alpha=alpha
         )),
     ])
+
+
+def create_decision_tree_pipeline(
+    max_depth: int = 5,
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1,
+    random_state: int = 42
+) -> Pipeline:
+    """
+    Create Decision Tree pipeline with scaling and Decision Tree regressor.
+    
+    Args:
+        max_depth: Maximum depth of the tree
+        min_samples_split: Minimum number of samples required to split a node
+        min_samples_leaf: Minimum number of samples required at a leaf node
+        random_state: Random state for reproducibility
+        
+    Returns:
+        Pipeline with scaler and Decision Tree regressor
+    """
+    return Pipeline([
+        ('scaler', StandardScaler()),
+        ('dt', DecisionTreeRegressor(
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state
+        )),
+    ])
+
+
+def train_decision_tree_with_cv(
+    X: np.ndarray,
+    y: np.ndarray,
+    cv_folds: int = 5,
+    max_depth: int = 5,
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1,
+    random_state: int = 42
+) -> Dict:
+    """
+    Train Decision Tree regressor using cross-validation to predict probabilities from features.
+    
+    Args:
+        X: Input features array
+        y: Target probabilities
+        cv_folds: Number of cross-validation folds
+        max_depth: Maximum depth of the tree
+        min_samples_split: Minimum number of samples required to split a node
+        min_samples_leaf: Minimum number of samples required at a leaf node
+        random_state: Random state for reproducibility
+        
+    Returns:
+        Dictionary with cross-validation results including scores and metrics
+    """
+    pipeline = create_decision_tree_pipeline(
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        random_state=random_state
+    )
+    
+    # Perform cross-validation
+    scoring = {
+        'r2': 'r2',
+        'neg_mean_squared_error': 'neg_mean_squared_error',
+        'neg_mean_absolute_error': 'neg_mean_absolute_error'
+    }
+    
+    cv_results = cross_validate(
+        pipeline,
+        X,
+        y,
+        cv=cv_folds,
+        scoring=scoring,
+        return_train_score=True,
+        n_jobs=-1
+    )
+    
+    # Calculate mean and std for each metric
+    results = {
+        'cv_folds': cv_folds,
+        'max_depth': max_depth,
+        'min_samples_split': min_samples_split,
+        'min_samples_leaf': min_samples_leaf,
+        'test_r2_mean': np.mean(cv_results['test_r2']),
+        'test_r2_std': np.std(cv_results['test_r2']),
+        'test_mse_mean': -np.mean(cv_results['test_neg_mean_squared_error']),
+        'test_mse_std': np.std(cv_results['test_neg_mean_squared_error']),
+        'test_mae_mean': -np.mean(cv_results['test_neg_mean_absolute_error']),
+        'test_mae_std': np.std(cv_results['test_neg_mean_absolute_error']),
+        'train_r2_mean': np.mean(cv_results['train_r2']),
+        'train_r2_std': np.std(cv_results['train_r2']),
+        'train_mse_mean': -np.mean(cv_results['train_neg_mean_squared_error']),
+        'train_mse_std': np.std(cv_results['train_neg_mean_squared_error']),
+        'train_mae_mean': -np.mean(cv_results['train_neg_mean_absolute_error']),
+        'train_mae_std': np.std(cv_results['train_neg_mean_absolute_error']),
+    }
+    
+    return results
 
 
 def train_mlp_with_cv(
@@ -466,14 +568,18 @@ def evaluate_all_methods(
     N_diff: np.ndarray,
     N_frac: np.ndarray,
     model_name: str,
+    methods: List[str],
     subset_name: str = "all data",
     hidden_layer_sizes: Tuple[int, ...] = (5,),
     max_iter: int = 500,
     random_state: int = 42,
-    alpha: float = 0.01
+    alpha: float = 0.01,
+    max_depth: int = 5,
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1
 ) -> None:
     """
-    Evaluate all prediction methods (baseline, exchange rate, MLP).
+    Evaluate prediction methods based on the methods list.
     
     Args:
         X: Feature matrix
@@ -482,71 +588,106 @@ def evaluate_all_methods(
         N_diff: Array of N_a - N_b differences
         N_frac: Array of N_b / N_a ratios
         model_name: Model name for loading exchange rates
+        methods: List of method names to evaluate: ["baseline", "exchange_rates", "mlp", "decision_tree"]
         subset_name: Name of the subset being evaluated (for display)
         hidden_layer_sizes: Tuple of hidden layer sizes for MLP
         max_iter: Maximum number of iterations for MLP training
         random_state: Random state for reproducibility
         alpha: L2 regularization parameter for MLP
+        max_depth: Maximum depth for Decision Tree
+        min_samples_split: Minimum samples to split for Decision Tree
+        min_samples_leaf: Minimum samples at leaf for Decision Tree
     """
     print(f"\n{'='*60}")
     print(f"Evaluating methods on {subset_name}")
     print(f"{'='*60}")
     print(f"Number of comparisons: {len(X)}")
+    print(f"Methods to evaluate: {methods}")
     print()
     
     # Evaluate baseline
-    print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
-    baseline_results = evaluate_baseline(y, N_diff)
-    
-    print("\nBaseline results:")
-    print(f"  R² score: {baseline_results['r2']:.4f}")
-    print(f"  MSE: {baseline_results['mse']:.4f}")
-    print(f"  MAE: {baseline_results['mae']:.4f}")
-    print()
+    if "baseline" in methods:
+        print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
+        baseline_results = evaluate_baseline(y, N_diff)
+        
+        print("\nBaseline results:")
+        print(f"  R² score: {baseline_results['r2']:.4f}")
+        print(f"  MSE: {baseline_results['mse']:.4f}")
+        print(f"  MAE: {baseline_results['mae']:.4f}")
+        print()
     
     # Try to load exchange rates and evaluate exchange rate method
-    print("Attempting to load exchange rates...")
-    exchange_rates = load_exchange_rates(model_name)
-    
-    if exchange_rates:
-        print(f"Loaded {len(exchange_rates)} exchange rate pairs")
-        print("Evaluating exchange rate-based predictor (using exchange rates and N_frac)...")
-        exchange_results = evaluate_exchange_rate_method(y, metadata, exchange_rates, N_frac)
+    if "exchange_rates" in methods:
+        print("Attempting to load exchange rates...")
+        exchange_rates = load_exchange_rates(model_name)
         
-        print("\nExchange rate method results:")
-        print(f"  R² score: {exchange_results['r2']:.4f}")
-        print(f"  MSE: {exchange_results['mse']:.4f}")
-        print(f"  MAE: {exchange_results['mae']:.4f}")
-        print(f"  Coverage: {exchange_results['coverage']:.2%}")
-        print()
-    else:
-        print("Exchange rate data not available - skipping exchange rate evaluation")
-        print()
+        if exchange_rates:
+            print(f"Loaded {len(exchange_rates)} exchange rate pairs")
+            print("Evaluating exchange rate-based predictor (using exchange rates and N_frac)...")
+            exchange_results = evaluate_exchange_rate_method(y, metadata, exchange_rates, N_frac)
+            
+            print("\nExchange rate method results:")
+            print(f"  R² score: {exchange_results['r2']:.4f}")
+            print(f"  MSE: {exchange_results['mse']:.4f}")
+            print(f"  MAE: {exchange_results['mae']:.4f}")
+            print(f"  Coverage: {exchange_results['coverage']:.2%}")
+            print()
+        else:
+            print("Exchange rate data not available - skipping exchange rate evaluation")
+            print()
     
     # Train MLP with cross-validation
-    # Using alpha for L2 regularization to encourage sparsity of weights
-    print(f"Training MLP regressor with cross-validation (L2 regularization, alpha={alpha})...")
-    cv_results = train_mlp_with_cv(
-        X, y, cv_folds=5,
-        hidden_layer_sizes=hidden_layer_sizes,
-        max_iter=max_iter,
-        random_state=random_state,
-        alpha=alpha
-    )
+    if "mlp" in methods:
+        print(f"Training MLP regressor with cross-validation (L2 regularization, alpha={alpha})...")
+        cv_results = train_mlp_with_cv(
+            X, y, cv_folds=5,
+            hidden_layer_sizes=hidden_layer_sizes,
+            max_iter=max_iter,
+            random_state=random_state,
+            alpha=alpha
+        )
+        
+        print(f"\nMLP Cross-validation results ({cv_results['cv_folds']}-fold CV):")
+        print(f"Hidden layer sizes: {cv_results['hidden_layer_sizes']}")
+        print(f"Alpha (L2 regularization): {cv_results['alpha']}")
+        print()
+        print("Test scores:")
+        print(f"  R² score: {cv_results['test_r2_mean']:.4f} ± {cv_results['test_r2_std']:.4f}")
+        print(f"  MSE: {cv_results['test_mse_mean']:.4f} ± {cv_results['test_mse_std']:.4f}")
+        print(f"  MAE: {cv_results['test_mae_mean']:.4f} ± {cv_results['test_mae_std']:.4f}")
+        print()
+        print("Train scores:")
+        print(f"  R² score: {cv_results['train_r2_mean']:.4f} ± {cv_results['train_r2_std']:.4f}")
+        print(f"  MSE: {cv_results['train_mse_mean']:.4f} ± {cv_results['train_mse_std']:.4f}")
+        print(f"  MAE: {cv_results['train_mae_mean']:.4f} ± {cv_results['train_mae_std']:.4f}")
+        print()
     
-    print(f"\nCross-validation results ({cv_results['cv_folds']}-fold CV):")
-    print(f"Hidden layer sizes: {cv_results['hidden_layer_sizes']}")
-    print(f"Alpha (L2 regularization): {cv_results['alpha']}")
-    print()
-    print("Test scores:")
-    print(f"  R² score: {cv_results['test_r2_mean']:.4f} ± {cv_results['test_r2_std']:.4f}")
-    print(f"  MSE: {cv_results['test_mse_mean']:.4f} ± {cv_results['test_mse_std']:.4f}")
-    print(f"  MAE: {cv_results['test_mae_mean']:.4f} ± {cv_results['test_mae_std']:.4f}")
-    print()
-    print("Train scores:")
-    print(f"  R² score: {cv_results['train_r2_mean']:.4f} ± {cv_results['train_r2_std']:.4f}")
-    print(f"  MSE: {cv_results['train_mse_mean']:.4f} ± {cv_results['train_mse_std']:.4f}")
-    print(f"  MAE: {cv_results['train_mae_mean']:.4f} ± {cv_results['train_mae_std']:.4f}")
+    # Train Decision Tree with cross-validation
+    if "decision_tree" in methods:
+        print(f"Training Decision Tree regressor with cross-validation (max_depth={max_depth})...")
+        dt_results = train_decision_tree_with_cv(
+            X, y, cv_folds=5,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state
+        )
+        
+        print(f"\nDecision Tree Cross-validation results ({dt_results['cv_folds']}-fold CV):")
+        print(f"Max depth: {dt_results['max_depth']}")
+        print(f"Min samples split: {dt_results['min_samples_split']}")
+        print(f"Min samples leaf: {dt_results['min_samples_leaf']}")
+        print()
+        print("Test scores:")
+        print(f"  R² score: {dt_results['test_r2_mean']:.4f} ± {dt_results['test_r2_std']:.4f}")
+        print(f"  MSE: {dt_results['test_mse_mean']:.4f} ± {dt_results['test_mse_std']:.4f}")
+        print(f"  MAE: {dt_results['test_mae_mean']:.4f} ± {dt_results['test_mae_std']:.4f}")
+        print()
+        print("Train scores:")
+        print(f"  R² score: {dt_results['train_r2_mean']:.4f} ± {dt_results['train_r2_std']:.4f}")
+        print(f"  MSE: {dt_results['train_mse_mean']:.4f} ± {dt_results['train_mse_std']:.4f}")
+        print(f"  MAE: {dt_results['train_mae_mean']:.4f} ± {dt_results['train_mae_std']:.4f}")
+        print()
 
 
 def print_data_summary(X: np.ndarray, y: np.ndarray, features: List[str], metadata: List[Dict[str, str]]) -> None:
@@ -567,10 +708,14 @@ def evaluate_equal_n_subset(
     N_diff: np.ndarray,
     N_frac: np.ndarray,
     model_name: str,
+    methods: List[str],
     hidden_layer_sizes: Tuple[int, ...] = (5,),
     max_iter: int = 500,
     random_state: int = 42,
-    alpha: float = 0.01
+    alpha: float = 0.01,
+    max_depth: int = 5,
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1
 ) -> None:
     """Evaluate methods on subset where N_a == N_b."""
     equal_n_mask = N_a == N_b
@@ -583,11 +728,14 @@ def evaluate_equal_n_subset(
         
         evaluate_all_methods(
             X_equal, y_equal, metadata_equal, N_diff_equal, N_frac_equal, 
-            model_name, "N_a == N_b subset",
+            model_name, methods, "N_a == N_b subset",
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
             random_state=random_state,
-            alpha=alpha
+            alpha=alpha,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf
         )
     else:
         print("\nNo comparisons with N_a == N_b found.")
@@ -658,6 +806,71 @@ def train_and_analyze_mlp_criteria(
     print(f"\n{'='*60}")
 
 
+def train_and_analyze_decision_tree(
+    X: np.ndarray,
+    y: np.ndarray,
+    features: List[str],
+    max_depth: int = 5,
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1,
+    random_state: int = 42
+) -> None:
+    """Train Decision Tree on full dataset and print learned feature importances and structure."""
+    print(f"\n{'='*60}")
+    print("Training Decision Tree on full dataset and analyzing learned structure")
+    print(f"{'='*60}\n")
+    
+    # Create pipeline with scaling and Decision Tree (same configuration as in train_decision_tree_with_cv)
+    pipeline = create_decision_tree_pipeline(
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        random_state=random_state
+    )
+    
+    # Train on full dataset
+    pipeline.fit(X, y)
+    
+    # Extract the Decision Tree from the pipeline
+    dt = pipeline.named_steps['dt']
+    
+    # Get feature importances
+    feature_importances = dt.feature_importances_
+    n_features = len(features)
+    
+    # Print tree structure information
+    print("Decision Tree Structure:")
+    print(f"  Number of nodes: {dt.tree_.node_count}")
+    print(f"  Tree depth: {dt.get_depth()}")
+    print(f"  Number of leaves: {dt.tree_.n_leaves}")
+    print(f"  Number of features: {n_features}")
+    print()
+    
+    # Create list of (feature_name, importance, abs_importance) tuples
+    feature_importance_pairs = [
+        (features[i], feature_importances[i], abs(feature_importances[i]))
+        for i in range(n_features)
+    ]
+    
+    # Sort by absolute importance magnitude (descending)
+    feature_importance_pairs.sort(key=lambda x: x[2], reverse=True)
+    
+    print("Feature Importances (ordered by magnitude):")
+    print("-" * 60)
+    for feature_name, importance, abs_importance in feature_importance_pairs:
+        print(f"  {feature_name:30s}: {importance:10.6f}")
+    
+    print()
+    print("Decision Rules:")
+    print("-" * 60)
+    # Note: export_text uses feature indices, but we want feature names
+    # We'll use the feature names we have
+    tree_rules = export_text(dt, feature_names=features, max_depth=max_depth, decimals=3)
+    print(tree_rules)
+    
+    print(f"\n{'='*60}")
+
+
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -703,6 +916,14 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=4,
+        dest="max_depth",
+        help="Maximum depth for Decision Tree"
+    )
+    
+    parser.add_argument(
         "--csv-path",
         type=str,
         default=None,
@@ -724,6 +945,10 @@ def parse_args():
 def main():
     args = parse_args()
     
+    # Methods to include in evaluation
+    methods = ["baseline", "exchange_rates", "mlp", "decision_tree"]
+    #methods = ["baseline", "decision_tree"]
+    
     # Set default file paths if not provided
     csv_path = args.csv_path or f"{args.model_name}-country_vs_country.csv"
     jsonl_path = args.jsonl_path or f"country_features_{args.model_name}.jsonl"
@@ -744,28 +969,39 @@ def main():
     
     # Evaluate on all data
     evaluate_all_methods(
-        X, y, metadata, N_diff, N_frac, args.model_name, "all data",
+        X, y, metadata, N_diff, N_frac, args.model_name, methods, "all data",
         hidden_layer_sizes=hidden_layer_sizes,
         max_iter=args.max_iter,
         random_state=args.random_state,
-        alpha=alpha
+        alpha=alpha,
+        max_depth=args.max_depth
     )
     
     # Evaluate on N_a == N_b subset
     evaluate_equal_n_subset(
-        X, y, metadata, N_a, N_b, N_diff, N_frac, args.model_name,
+        X, y, metadata, N_a, N_b, N_diff, N_frac, args.model_name, methods,
         hidden_layer_sizes=hidden_layer_sizes,
         max_iter=args.max_iter,
         random_state=args.random_state,
-        alpha=alpha
+        alpha=alpha,
+        max_depth=args.max_depth
     )
     
-    # Train MLP and analyze learned criteria
-    train_and_analyze_mlp_criteria(X, y, features,
-                                   hidden_layer_sizes=hidden_layer_sizes,
-                                   max_iter=args.max_iter,
-                                   random_state=args.random_state,
-                                   alpha=alpha)
+    # Train MLP and analyze learned criteria (only if mlp is in methods)
+    if "mlp" in methods:
+        train_and_analyze_mlp_criteria(X, y, features,
+                                       hidden_layer_sizes=hidden_layer_sizes,
+                                       max_iter=args.max_iter,
+                                       random_state=args.random_state,
+                                       alpha=alpha)
+    
+    # Train Decision Tree and analyze learned structure (only if decision_tree is in methods)
+    if "decision_tree" in methods:
+        train_and_analyze_decision_tree(X, y, features,
+                                        max_depth=args.max_depth,
+                                        min_samples_split=2,
+                                        min_samples_leaf=1,
+                                        random_state=args.random_state)
 
 
 if __name__ == "__main__":
