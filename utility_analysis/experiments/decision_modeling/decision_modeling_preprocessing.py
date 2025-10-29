@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import numpy as np
@@ -163,6 +164,38 @@ def preprocess_decision_data(
     return X, y, feature_names, metadata_list, N_a, N_b
 
 
+def create_mlp_pipeline(
+    hidden_layer_sizes: Tuple[int, ...] = (5,),
+    max_iter: int = 500,
+    random_state: int = 42,
+    alpha: float = 0.01
+) -> Pipeline:
+    """
+    Create MLP pipeline with scaling and MLP regressor.
+    
+    Args:
+        hidden_layer_sizes: Tuple of hidden layer sizes
+        max_iter: Maximum number of iterations
+        random_state: Random state for reproducibility
+        alpha: L2 regularization parameter (higher = more sparsity/regularization)
+        
+    Returns:
+        Pipeline with scaler and MLP regressor
+    """
+    return Pipeline([
+        ('scaler', StandardScaler()),
+        ('mlp', MLPRegressor(
+            hidden_layer_sizes=hidden_layer_sizes,
+            max_iter=max_iter,
+            random_state=random_state,
+            early_stopping=True,
+            activation='tanh',
+            validation_fraction=0.1,
+            alpha=alpha
+        )),
+    ])
+
+
 def train_mlp_with_cv(
     X: np.ndarray,
     y: np.ndarray,
@@ -190,19 +223,12 @@ def train_mlp_with_cv(
     # Create pipeline with scaling and MLP
     # Scaling is important for neural networks
     # alpha parameter adds L2 regularization to encourage sparsity of weights
-    pipeline = Pipeline([
-        #TODO Do we want scaling?
-        ('scaler', StandardScaler()),
-        ('mlp', MLPRegressor(
-            hidden_layer_sizes=hidden_layer_sizes,
-            max_iter=max_iter,
-            random_state=random_state,
-            early_stopping=True,
-            activation='tanh',
-            validation_fraction=0.1,
-            alpha=alpha  # L2 regularization: higher values encourage sparser weights
-        )),
-    ])
+    pipeline = create_mlp_pipeline(
+        hidden_layer_sizes=hidden_layer_sizes,
+        max_iter=max_iter,
+        random_state=random_state,
+        alpha=alpha
+    )
     
     # Perform cross-validation
     # Using multiple scoring metrics for regression
@@ -386,6 +412,7 @@ def compute_exchange_rate_predictions(
             utility_ratio_threshold = 1.0 / exchange_rate
             
             # Country A has higher total utility if: N_frac < 1 / exchange_rate
+            #predictions.append(np.clip(1/(n_frac * exchange_rate), 0.0, 1.0))
             if n_frac < utility_ratio_threshold - tolerance:
                 # Country A has higher total utility
                 predictions.append(1.0)
@@ -439,7 +466,11 @@ def evaluate_all_methods(
     N_diff: np.ndarray,
     N_frac: np.ndarray,
     model_name: str,
-    subset_name: str = "all data"
+    subset_name: str = "all data",
+    hidden_layer_sizes: Tuple[int, ...] = (5,),
+    max_iter: int = 500,
+    random_state: int = 42,
+    alpha: float = 0.01
 ) -> None:
     """
     Evaluate all prediction methods (baseline, exchange rate, MLP).
@@ -452,6 +483,10 @@ def evaluate_all_methods(
         N_frac: Array of N_b / N_a ratios
         model_name: Model name for loading exchange rates
         subset_name: Name of the subset being evaluated (for display)
+        hidden_layer_sizes: Tuple of hidden layer sizes for MLP
+        max_iter: Maximum number of iterations for MLP training
+        random_state: Random state for reproducibility
+        alpha: L2 regularization parameter for MLP
     """
     print(f"\n{'='*60}")
     print(f"Evaluating methods on {subset_name}")
@@ -489,9 +524,15 @@ def evaluate_all_methods(
         print()
     
     # Train MLP with cross-validation
-    # Using alpha=0.01 for L2 regularization to encourage sparsity of weights
-    print("Training MLP regressor with cross-validation (L2 regularization, alpha=0.01)...")
-    cv_results = train_mlp_with_cv(X, y, cv_folds=5, alpha=0.01)
+    # Using alpha for L2 regularization to encourage sparsity of weights
+    print(f"Training MLP regressor with cross-validation (L2 regularization, alpha={alpha})...")
+    cv_results = train_mlp_with_cv(
+        X, y, cv_folds=5,
+        hidden_layer_sizes=hidden_layer_sizes,
+        max_iter=max_iter,
+        random_state=random_state,
+        alpha=alpha
+    )
     
     print(f"\nCross-validation results ({cv_results['cv_folds']}-fold CV):")
     print(f"Hidden layer sizes: {cv_results['hidden_layer_sizes']}")
@@ -508,33 +549,30 @@ def evaluate_all_methods(
     print(f"  MAE: {cv_results['train_mae_mean']:.4f} ± {cv_results['train_mae_std']:.4f}")
 
 
-def main():
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: python decision_modeling_preprocessing.py <model_name>")
-        sys.exit(1)
-    
-    model_name = sys.argv[1]
-    csv_path = f"{model_name}-country_vs_country.csv"
-    jsonl_path = f"country_features_{model_name}.jsonl"
-    
-    X, y, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path)
-    
+def print_data_summary(X: np.ndarray, y: np.ndarray, features: List[str], metadata: List[Dict[str, str]]) -> None:
+    """Print summary information about the loaded data."""
     print(f"Loaded {len(X)} comparisons")
     print(f"Feature shape: {X.shape}")
     print(f"Features: {features}")
     print(f"Probability range: [{y.min():.3f}, {y.max():.3f}]")
     print(f"Sample metadata: {metadata[0] if metadata else 'None'}")
-    
-    # Extract N_diff and N_frac (last two columns of X)
-    N_diff = X[:, -2]
-    N_frac = X[:, -1]
-    
-    # Evaluate on all data
-    evaluate_all_methods(X, y, metadata, N_diff, N_frac, model_name, "all data")
-    
-    # Filter for N_a == N_b
+
+
+def evaluate_equal_n_subset(
+    X: np.ndarray,
+    y: np.ndarray,
+    metadata: List[Dict[str, str]],
+    N_a: np.ndarray,
+    N_b: np.ndarray,
+    N_diff: np.ndarray,
+    N_frac: np.ndarray,
+    model_name: str,
+    hidden_layer_sizes: Tuple[int, ...] = (5,),
+    max_iter: int = 500,
+    random_state: int = 42,
+    alpha: float = 0.01
+) -> None:
+    """Evaluate methods on subset where N_a == N_b."""
     equal_n_mask = N_a == N_b
     if np.any(equal_n_mask):
         X_equal = X[equal_n_mask]
@@ -543,10 +581,191 @@ def main():
         N_diff_equal = N_diff[equal_n_mask]
         N_frac_equal = N_frac[equal_n_mask]
         
-        evaluate_all_methods(X_equal, y_equal, metadata_equal, N_diff_equal, N_frac_equal, 
-                            model_name, "N_a == N_b subset")
+        evaluate_all_methods(
+            X_equal, y_equal, metadata_equal, N_diff_equal, N_frac_equal, 
+            model_name, "N_a == N_b subset",
+            hidden_layer_sizes=hidden_layer_sizes,
+            max_iter=max_iter,
+            random_state=random_state,
+            alpha=alpha
+        )
     else:
         print("\nNo comparisons with N_a == N_b found.")
+
+
+def train_and_analyze_mlp_criteria(
+    X: np.ndarray,
+    y: np.ndarray,
+    features: List[str],
+    hidden_layer_sizes: Tuple[int, ...] = (5,),
+    max_iter: int = 500,
+    random_state: int = 42,
+    alpha: float = 0.01
+) -> None:
+    """Train MLP on full dataset and print learned criteria analysis."""
+    print(f"\n{'='*60}")
+    print("Training MLP on full dataset and analyzing learned criteria")
+    print(f"{'='*60}\n")
+    
+    # Create pipeline with scaling and MLP (same configuration as in train_mlp_with_cv)
+    pipeline = create_mlp_pipeline(
+        hidden_layer_sizes=hidden_layer_sizes,
+        max_iter=max_iter,
+        random_state=random_state,
+        alpha=alpha
+    )
+    
+    # Train on full dataset
+    pipeline.fit(X, y)
+    
+    # Extract the MLP from the pipeline
+    mlp = pipeline.named_steps['mlp']
+    
+    # Get weights: coefs_[0] is input->hidden, coefs_[1] is hidden->output
+    # Shape: coefs_[0] is (n_features, n_hidden), coefs_[1] is (n_hidden, 1)
+    input_to_hidden_weights = mlp.coefs_[0]  # Shape: (n_features, n_hidden)
+    hidden_to_output_weights = mlp.coefs_[1].flatten()  # Shape: (n_hidden,)
+    n_hidden = len(hidden_to_output_weights)
+    n_features = len(features)
+    
+    print(f"Number of hidden neurons: {n_hidden}")
+    print(f"Number of input features: {n_features}\n")
+    
+    # Analyze each hidden neuron as a learned criterion
+    print("Learned Criteria (Hidden Neurons):")
+    print("-" * 60)
+    
+    for neuron_idx in range(n_hidden):
+        print(f"\nCriterion {neuron_idx + 1}:")
+        print(f"  Output weight: {hidden_to_output_weights[neuron_idx]:.6f}")
+        
+        # Get input weights for this neuron
+        input_weights = input_to_hidden_weights[:, neuron_idx]
+        
+        # Create list of (feature_name, weight, abs_weight) tuples
+        feature_weight_pairs = [
+            (features[i], input_weights[i], abs(input_weights[i]))
+            for i in range(n_features)
+        ]
+        
+        # Sort by absolute weight magnitude (descending)
+        feature_weight_pairs.sort(key=lambda x: x[2], reverse=True)
+        
+        print("  Input feature weights (ordered by magnitude):")
+        for feature_name, weight, abs_weight in feature_weight_pairs:
+            print(f"    {feature_name:30s}: {weight:10.6f}")
+    
+    print(f"\n{'='*60}")
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate MLP models for decision modeling",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    parser.add_argument(
+        "model_name",
+        type=str,
+        help="Model name (used to construct CSV and JSONL file paths)"
+    )
+    
+    parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=3,
+        dest="hidden_dim",
+        help="Number of hidden neurons in the MLP"
+    )
+    
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.1,
+        help="L2 regularization parameter (higher = more sparsity/regularization)"
+    )
+    
+    parser.add_argument(
+        "--max-iter",
+        type=int,
+        default=500,
+        dest="max_iter",
+        help="Maximum number of iterations for MLP training"
+    )
+    
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        dest="random_state",
+        help="Random state for reproducibility"
+    )
+    
+    parser.add_argument(
+        "--csv-path",
+        type=str,
+        default=None,
+        dest="csv_path",
+        help="Path to CSV file with country comparisons (default: {model_name}-country_vs_country.csv)"
+    )
+    
+    parser.add_argument(
+        "--jsonl-path",
+        type=str,
+        default=None,
+        dest="jsonl_path",
+        help="Path to JSONL file with country features (default: country_features_{model_name}.jsonl)"
+    )
+    
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    
+    # Set default file paths if not provided
+    csv_path = args.csv_path or f"{args.model_name}-country_vs_country.csv"
+    jsonl_path = args.jsonl_path or f"country_features_{args.model_name}.jsonl"
+    
+    # Prepare MLP hyperparameters
+    hidden_layer_sizes = (args.hidden_dim,)
+    alpha = args.alpha
+    
+    # Load and preprocess data
+    X, y, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path)
+    
+    # Print data summary
+    print_data_summary(X, y, features, metadata)
+    
+    # Extract N_diff and N_frac (last two columns of X)
+    N_diff = X[:, -2]
+    N_frac = X[:, -1]
+    
+    # Evaluate on all data
+    evaluate_all_methods(
+        X, y, metadata, N_diff, N_frac, args.model_name, "all data",
+        hidden_layer_sizes=hidden_layer_sizes,
+        max_iter=args.max_iter,
+        random_state=args.random_state,
+        alpha=alpha
+    )
+    
+    # Evaluate on N_a == N_b subset
+    evaluate_equal_n_subset(
+        X, y, metadata, N_a, N_b, N_diff, N_frac, args.model_name,
+        hidden_layer_sizes=hidden_layer_sizes,
+        max_iter=args.max_iter,
+        random_state=args.random_state,
+        alpha=alpha
+    )
+    
+    # Train MLP and analyze learned criteria
+    train_and_analyze_mlp_criteria(X, y, features,
+                                   hidden_layer_sizes=hidden_layer_sizes,
+                                   max_iter=args.max_iter,
+                                   random_state=args.random_state,
+                                   alpha=alpha)
 
 
 if __name__ == "__main__":
