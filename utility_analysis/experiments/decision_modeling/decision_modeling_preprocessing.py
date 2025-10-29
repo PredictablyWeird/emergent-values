@@ -349,7 +349,8 @@ def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchang
 def compute_exchange_rate_predictions(
     metadata: List[Dict[str, str]],
     exchange_rates: Dict[Tuple[str, str], float],
-    N_frac: np.ndarray
+    N_frac: np.ndarray,
+    tolerance: float = 0.2,
 ) -> np.ndarray:
     """
     Compute predictions based on exchange rates and quantities.
@@ -385,10 +386,10 @@ def compute_exchange_rate_predictions(
             utility_ratio_threshold = 1.0 / exchange_rate
             
             # Country A has higher total utility if: N_frac < 1 / exchange_rate
-            if n_frac < utility_ratio_threshold:
+            if n_frac < utility_ratio_threshold - tolerance:
                 # Country A has higher total utility
                 predictions.append(1.0)
-            elif n_frac > utility_ratio_threshold:
+            elif n_frac > utility_ratio_threshold + tolerance:
                 # Country B has higher total utility
                 predictions.append(0.0)
             else:
