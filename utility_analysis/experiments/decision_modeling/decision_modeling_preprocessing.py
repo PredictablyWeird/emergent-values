@@ -75,7 +75,7 @@ def create_feature_difference_vector(
 def preprocess_decision_data(
     csv_path: str,
     jsonl_path: str
-) -> Tuple[np.ndarray, np.ndarray, List[str], List[Dict[str, str]]]:
+) -> Tuple[np.ndarray, np.ndarray, List[str], List[Dict[str, str]], np.ndarray, np.ndarray]:
     """
     Preprocess decision data from CSV and country features from JSONL.
     
@@ -89,6 +89,8 @@ def preprocess_decision_data(
             - y: numpy array with probabilities
             - features: list of feature names
             - metadata: list of dictionaries with "country_a" and "country_b" keys
+            - N_a: numpy array with N_a values
+            - N_b: numpy array with N_b values
     """
     # Load country features
     country_features = load_country_features(jsonl_path)
@@ -110,6 +112,8 @@ def preprocess_decision_data(
     X_rows = []
     y_values = []
     metadata_list = []
+    N_a_values = []
+    N_b_values = []
     
     missing_countries = set()
     
@@ -144,6 +148,8 @@ def preprocess_decision_data(
             "country_a": country_a,
             "country_b": country_b
         })
+        N_a_values.append(N_a)
+        N_b_values.append(N_b)
     
     if missing_countries:
         print(f"Warning: Missing features for countries: {missing_countries}")
@@ -151,8 +157,10 @@ def preprocess_decision_data(
     # Convert to numpy arrays
     X = np.array(X_rows)
     y = np.array(y_values)
+    N_a = np.array(N_a_values)
+    N_b = np.array(N_b_values)
     
-    return X, y, feature_names, metadata_list
+    return X, y, feature_names, metadata_list, N_a, N_b
 
 
 def train_mlp_with_cv(
@@ -161,7 +169,8 @@ def train_mlp_with_cv(
     cv_folds: int = 5,
     hidden_layer_sizes: Tuple[int, ...] = (5,),
     max_iter: int = 500,
-    random_state: int = 42
+    random_state: int = 42,
+    alpha: float = 0.01
 ) -> Dict:
     """
     Train MLP regressor using cross-validation to predict probabilities from features.
@@ -173,12 +182,14 @@ def train_mlp_with_cv(
         hidden_layer_sizes: Tuple of hidden layer sizes
         max_iter: Maximum number of iterations
         random_state: Random state for reproducibility
+        alpha: L2 regularization parameter (higher = more sparsity/regularization)
         
     Returns:
         Dictionary with cross-validation results including scores and metrics
     """
     # Create pipeline with scaling and MLP
     # Scaling is important for neural networks
+    # alpha parameter adds L2 regularization to encourage sparsity of weights
     pipeline = Pipeline([
         #TODO Do we want scaling?
         ('scaler', StandardScaler()),
@@ -188,7 +199,8 @@ def train_mlp_with_cv(
             random_state=random_state,
             early_stopping=True,
             activation='tanh',
-            validation_fraction=0.1
+            validation_fraction=0.1,
+            alpha=alpha  # L2 regularization: higher values encourage sparser weights
         )),
     ])
     
@@ -214,6 +226,7 @@ def train_mlp_with_cv(
     results = {
         'cv_folds': cv_folds,
         'hidden_layer_sizes': hidden_layer_sizes,
+        'alpha': alpha,
         'test_r2_mean': np.mean(cv_results['test_r2']),
         'test_r2_std': np.std(cv_results['test_r2']),
         'test_mse_mean': -np.mean(cv_results['test_neg_mean_squared_error']),
@@ -418,29 +431,32 @@ def evaluate_exchange_rate_method(
     return results
 
 
-def main():
-    import sys
+def evaluate_all_methods(
+    X: np.ndarray,
+    y: np.ndarray,
+    metadata: List[Dict[str, str]],
+    N_diff: np.ndarray,
+    N_frac: np.ndarray,
+    model_name: str,
+    subset_name: str = "all data"
+) -> None:
+    """
+    Evaluate all prediction methods (baseline, exchange rate, MLP).
     
-    if len(sys.argv) < 2:
-        print("Usage: python decision_modeling_preprocessing.py <model_name>")
-        sys.exit(1)
-    
-    model_name = sys.argv[1]
-    csv_path = f"{model_name}-country_vs_country.csv"
-    jsonl_path = f"country_features_{model_name}.jsonl"
-    
-    X, y, features, metadata = preprocess_decision_data(csv_path, jsonl_path)
-    
-    print(f"Loaded {len(X)} comparisons")
-    print(f"Feature shape: {X.shape}")
-    print(f"Features: {features}")
-    print(f"Probability range: [{y.min():.3f}, {y.max():.3f}]")
-    print(f"Sample metadata: {metadata[0] if metadata else 'None'}")
+    Args:
+        X: Feature matrix
+        y: Target probabilities
+        metadata: List of dictionaries with country information
+        N_diff: Array of N_a - N_b differences
+        N_frac: Array of N_b / N_a ratios
+        model_name: Model name for loading exchange rates
+        subset_name: Name of the subset being evaluated (for display)
+    """
+    print(f"\n{'='*60}")
+    print(f"Evaluating methods on {subset_name}")
+    print(f"{'='*60}")
+    print(f"Number of comparisons: {len(X)}")
     print()
-    
-    # Extract N_diff and N_frac (last two columns of X)
-    N_diff = X[:, -2]
-    N_frac = X[:, -1]
     
     # Evaluate baseline
     print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
@@ -472,11 +488,13 @@ def main():
         print()
     
     # Train MLP with cross-validation
-    print("Training MLP regressor with cross-validation...")
-    cv_results = train_mlp_with_cv(X, y, cv_folds=5)
+    # Using alpha=0.01 for L2 regularization to encourage sparsity of weights
+    print("Training MLP regressor with cross-validation (L2 regularization, alpha=0.01)...")
+    cv_results = train_mlp_with_cv(X, y, cv_folds=5, alpha=0.01)
     
     print(f"\nCross-validation results ({cv_results['cv_folds']}-fold CV):")
     print(f"Hidden layer sizes: {cv_results['hidden_layer_sizes']}")
+    print(f"Alpha (L2 regularization): {cv_results['alpha']}")
     print()
     print("Test scores:")
     print(f"  R² score: {cv_results['test_r2_mean']:.4f} ± {cv_results['test_r2_std']:.4f}")
@@ -487,6 +505,47 @@ def main():
     print(f"  R² score: {cv_results['train_r2_mean']:.4f} ± {cv_results['train_r2_std']:.4f}")
     print(f"  MSE: {cv_results['train_mse_mean']:.4f} ± {cv_results['train_mse_std']:.4f}")
     print(f"  MAE: {cv_results['train_mae_mean']:.4f} ± {cv_results['train_mae_std']:.4f}")
+
+
+def main():
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python decision_modeling_preprocessing.py <model_name>")
+        sys.exit(1)
+    
+    model_name = sys.argv[1]
+    csv_path = f"{model_name}-country_vs_country.csv"
+    jsonl_path = f"country_features_{model_name}.jsonl"
+    
+    X, y, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path)
+    
+    print(f"Loaded {len(X)} comparisons")
+    print(f"Feature shape: {X.shape}")
+    print(f"Features: {features}")
+    print(f"Probability range: [{y.min():.3f}, {y.max():.3f}]")
+    print(f"Sample metadata: {metadata[0] if metadata else 'None'}")
+    
+    # Extract N_diff and N_frac (last two columns of X)
+    N_diff = X[:, -2]
+    N_frac = X[:, -1]
+    
+    # Evaluate on all data
+    evaluate_all_methods(X, y, metadata, N_diff, N_frac, model_name, "all data")
+    
+    # Filter for N_a == N_b
+    equal_n_mask = N_a == N_b
+    if np.any(equal_n_mask):
+        X_equal = X[equal_n_mask]
+        y_equal = y[equal_n_mask]
+        metadata_equal = [metadata[i] for i in range(len(metadata)) if equal_n_mask[i]]
+        N_diff_equal = N_diff[equal_n_mask]
+        N_frac_equal = N_frac[equal_n_mask]
+        
+        evaluate_all_methods(X_equal, y_equal, metadata_equal, N_diff_equal, N_frac_equal, 
+                            model_name, "N_a == N_b subset")
+    else:
+        print("\nNo comparisons with N_a == N_b found.")
 
 
 if __name__ == "__main__":
