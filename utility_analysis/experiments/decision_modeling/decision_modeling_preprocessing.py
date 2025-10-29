@@ -100,8 +100,8 @@ def preprocess_decision_data(
     first_country = next(iter(country_features))
     feature_names = sorted(country_features[first_country].keys())
     
-    # Add N_diff feature name (will be appended at the end)
-    feature_names = feature_names + ['N_diff']
+    # Add N_diff and N_frac feature names (will be appended at the end)
+    feature_names = feature_names + ['N_diff', 'N_frac']
     
     # Load decision data
     decisions = load_decision_file(csv_path)
@@ -128,14 +128,15 @@ def preprocess_decision_data(
         
         # Create difference vector for country features
         diff_vector = create_feature_difference_vector(
-            features_a, features_b, feature_names[:-1]  # Exclude N_diff from feature names here
+            features_a, features_b, feature_names[:-2]  # Exclude N_diff and N_frac from feature names here
         )
         
-        # Calculate N_diff = N_a - N_b
+        # Calculate N_diff = N_a - N_b and N_frac = N_b / N_a
         N_diff = N_a - N_b
+        N_frac = N_b / N_a if N_a != 0 else 0.0
         
-        # Append N_diff to the feature vector
-        feature_vector = np.append(diff_vector, N_diff)
+        # Append N_diff and N_frac to the feature vector
+        feature_vector = np.append(diff_vector, [N_diff, N_frac])
         
         X_rows.append(feature_vector)
         y_values.append(probability)
@@ -272,6 +273,151 @@ def evaluate_baseline(y_true: np.ndarray, N_diff: np.ndarray) -> Dict:
     return results
 
 
+def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchange_rates/results",
+                       category: str = "countries", measure: str = "terminal_illness") -> Dict[Tuple[str, str], float]:
+    """
+    Load exchange rates for countries from exchange rate results.
+    
+    Args:
+        model_name: Model name
+        results_dir: Directory containing exchange rate results
+        category: Category (e.g., 'countries')
+        measure: Measure (e.g., 'terminal_illness')
+        
+    Returns:
+        Dictionary mapping (country_a, country_b) tuples to exchange rate ratios.
+        Returns empty dict if data not available.
+    """
+    import os
+    import sys
+    import math
+    
+    # Add path to import from create_exchange_rates_plots
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    
+    try:
+        from create_exchange_rates_plots import (
+            load_thurstonian_results, fit_utility_curves, two_way_geometric_exchange_rate
+        )
+        from experiments.exchange_rates.evaluate_exchange_rates import N_values  # noqa: F401
+    except ImportError:
+        return {}
+    
+    model_save_dir = os.path.join(results_dir, model_name)
+    if not os.path.exists(model_save_dir):
+        return {}
+    
+    try:
+        df, measure_vals = load_thurstonian_results(model_save_dir, category, measure)
+        slopes, intercepts = fit_utility_curves(df, return_mse=False)
+    except (FileNotFoundError, ValueError):
+        return {}
+    
+    # Build exchange rate dictionary
+    exchange_rates = {}
+    countries = list(slopes.keys())
+    
+    for country_a in countries:
+        for country_b in countries:
+            if country_a == country_b:
+                continue
+            exchange_rate = two_way_geometric_exchange_rate(
+                country_a, country_b, measure_vals,
+                slopes, intercepts,
+                skip_if_negative_slope=False,
+                allow_negative_slopes=True
+            )
+            if exchange_rate is not None and not math.isinf(exchange_rate):
+                exchange_rates[(country_a, country_b)] = exchange_rate
+    
+    return exchange_rates
+
+
+def compute_exchange_rate_predictions(
+    metadata: List[Dict[str, str]],
+    exchange_rates: Dict[Tuple[str, str], float],
+    N_frac: np.ndarray
+) -> np.ndarray:
+    """
+    Compute predictions based on exchange rates and quantities.
+    
+    Exchange rate interpretation:
+    - exchange_rate(country_a, country_b) = r means: r units of country_a = 1 unit of country_b
+    - So N_a units of country_a = N_a / r units of country_b utility
+    - N_b units of country_b = N_b units of country_b utility
+    - Country A has higher total utility if: N_a / r > N_b
+    - Which rearranges to: N_a / N_b > r, or N_b / N_a < 1 / r
+    - Since N_frac = N_b / N_a, we compare: N_frac vs 1 / exchange_rate
+    
+    Args:
+        metadata: List of dictionaries with 'country_a' and 'country_b' keys
+        exchange_rates: Dictionary mapping (country_a, country_b) to exchange rate
+        N_frac: Array of N_b / N_a ratios
+        
+    Returns:
+        Array of predictions (probabilities)
+    """
+    predictions = []
+    
+    for i, meta in enumerate(metadata):
+        country_a = meta['country_a']
+        country_b = meta['country_b']
+        n_frac = N_frac[i]
+        
+        # Check if we have exchange rate for this pair
+        if (country_a, country_b) in exchange_rates:
+            exchange_rate = exchange_rates[(country_a, country_b)]
+            # Convert exchange rate to per-unit utility ratio
+            # exchange_rate > 1 means country_a needs more units, so utility_per_unit_A = 1/exchange_rate
+            utility_ratio_threshold = 1.0 / exchange_rate
+            
+            # Country A has higher total utility if: N_frac < 1 / exchange_rate
+            if n_frac < utility_ratio_threshold:
+                # Country A has higher total utility
+                predictions.append(1.0)
+            elif n_frac > utility_ratio_threshold:
+                # Country B has higher total utility
+                predictions.append(0.0)
+            else:
+                # Equal total utility
+                predictions.append(0.5)
+        else:
+            # Exchange rate not available, predict 0.5
+            predictions.append(0.5)
+    
+    return np.array(predictions)
+
+
+def evaluate_exchange_rate_method(
+    y_true: np.ndarray,
+    metadata: List[Dict[str, str]],
+    exchange_rates: Dict[Tuple[str, str], float],
+    N_frac: np.ndarray
+) -> Dict:
+    """
+    Evaluate exchange rate-based predictor performance.
+    
+    Args:
+        y_true: True probability values
+        metadata: List of dictionaries with 'country_a' and 'country_b' keys
+        exchange_rates: Dictionary mapping (country_a, country_b) to exchange rate
+        N_frac: Array of N_b / N_a ratios
+        
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    y_pred = compute_exchange_rate_predictions(metadata, exchange_rates, N_frac)
+    
+    results = {
+        'r2': r2_score(y_true, y_pred),
+        'mse': mean_squared_error(y_true, y_pred),
+        'mae': mean_absolute_error(y_true, y_pred),
+        'coverage': np.mean([(meta['country_a'], meta['country_b']) in exchange_rates for meta in metadata])
+    }
+    
+    return results
+
+
 def main():
     import sys
     
@@ -292,8 +438,9 @@ def main():
     print(f"Sample metadata: {metadata[0] if metadata else 'None'}")
     print()
     
-    # Extract N_diff (last column of X)
-    N_diff = X[:, -1]
+    # Extract N_diff and N_frac (last two columns of X)
+    N_diff = X[:, -2]
+    N_frac = X[:, -1]
     
     # Evaluate baseline
     print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
@@ -304,6 +451,25 @@ def main():
     print(f"  MSE: {baseline_results['mse']:.4f}")
     print(f"  MAE: {baseline_results['mae']:.4f}")
     print()
+    
+    # Try to load exchange rates and evaluate exchange rate method
+    print("Attempting to load exchange rates...")
+    exchange_rates = load_exchange_rates(model_name)
+    
+    if exchange_rates:
+        print(f"Loaded {len(exchange_rates)} exchange rate pairs")
+        print("Evaluating exchange rate-based predictor (using exchange rates and N_frac)...")
+        exchange_results = evaluate_exchange_rate_method(y, metadata, exchange_rates, N_frac)
+        
+        print("\nExchange rate method results:")
+        print(f"  R² score: {exchange_results['r2']:.4f}")
+        print(f"  MSE: {exchange_results['mse']:.4f}")
+        print(f"  MAE: {exchange_results['mae']:.4f}")
+        print(f"  Coverage: {exchange_results['coverage']:.2%}")
+        print()
+    else:
+        print("Exchange rate data not available - skipping exchange rate evaluation")
+        print()
     
     # Train MLP with cross-validation
     print("Training MLP regressor with cross-validation...")
