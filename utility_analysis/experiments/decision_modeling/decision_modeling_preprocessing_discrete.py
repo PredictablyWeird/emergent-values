@@ -20,8 +20,8 @@ def map_scores_to_labels(scores: np.ndarray, threshold: float = 0.1) -> np.ndarr
     Args:
         scores: Array of continuous scores (probabilities)
         threshold: Threshold parameter t for mapping
-                   - "A" if score >= 0.5 + t
-                   - "B" if score <= 0.5 - t
+                   - "A" if score > 0.5 + t
+                   - "B" if score < 0.5 - t
                    - "ambiguous" otherwise
     
     Returns:
@@ -31,9 +31,9 @@ def map_scores_to_labels(scores: np.ndarray, threshold: float = 0.1) -> np.ndarr
     high_threshold = 0.5 + threshold
     low_threshold = 0.5 - threshold
     
-    labels[scores >= high_threshold] = "A"
-    labels[scores <= low_threshold] = "B"
-    labels[(scores > low_threshold) & (scores < high_threshold)] = "ambiguous"
+    labels[scores > high_threshold] = "A"
+    labels[scores < low_threshold] = "B"
+    labels[(scores >= low_threshold) & (scores <= high_threshold)] = "ambiguous"
     
     return labels
 
@@ -1098,6 +1098,14 @@ def parse_args():
         help="Threshold parameter t for mapping scores to labels: 'A' if score >= 0.5+t, 'B' if score <= 0.5-t, 'ambiguous' otherwise"
     )
     
+    parser.add_argument(
+        "--no-include-ambiguous",
+        action="store_false",
+        default=True,
+        dest="include_ambiguous",
+        help="Exclude samples with 'ambiguous' label from training and evaluation (default: include ambiguous samples)"
+    )
+    
     return parser.parse_args()
 
 
@@ -1118,6 +1126,17 @@ def main():
     
     # Load and preprocess data (now includes label mapping)
     X, y, y_labels, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path, args.threshold)
+    
+    # Filter out ambiguous samples if requested
+    if not args.include_ambiguous:
+        non_ambiguous_mask = y_labels != 'ambiguous'
+        X = X[non_ambiguous_mask]
+        y = y[non_ambiguous_mask]
+        y_labels = y_labels[non_ambiguous_mask]
+        metadata = [metadata[i] for i in range(len(metadata)) if non_ambiguous_mask[i]]
+        N_a = N_a[non_ambiguous_mask]
+        N_b = N_b[non_ambiguous_mask]
+        print(f"Filtered out {np.sum(~non_ambiguous_mask)} ambiguous samples. Remaining: {len(X)} samples.")
     
     # Print data summary (now includes label distribution)
     print_data_summary(X, y, y_labels, features, metadata, args.threshold)
