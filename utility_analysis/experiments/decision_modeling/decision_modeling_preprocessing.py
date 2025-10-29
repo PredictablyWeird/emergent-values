@@ -6,6 +6,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import cross_validate
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 
 def load_country_features(jsonl_path: str) -> Dict[str, Dict[str, float]]:
@@ -178,6 +179,7 @@ def train_mlp_with_cv(
     # Create pipeline with scaling and MLP
     # Scaling is important for neural networks
     pipeline = Pipeline([
+        #TODO Do we want scaling?
         ('scaler', StandardScaler()),
         ('mlp', MLPRegressor(
             hidden_layer_sizes=hidden_layer_sizes,
@@ -228,6 +230,48 @@ def train_mlp_with_cv(
     return results
 
 
+def compute_baseline_predictions(N_diff: np.ndarray) -> np.ndarray:
+    """
+    Compute baseline predictions based on N_a vs N_b comparison.
+    
+    Args:
+        N_diff: Array of N_a - N_b differences
+        
+    Returns:
+        Array of baseline predictions:
+        - 1.0 if N_a > N_b (N_diff > 0)
+        - 0.0 if N_a < N_b (N_diff < 0)
+        - 0.5 if N_a == N_b (N_diff == 0)
+    """
+    predictions = np.zeros_like(N_diff)
+    predictions[N_diff > 0] = 1.0
+    predictions[N_diff < 0] = 0.0
+    predictions[N_diff == 0] = 0.5
+    return predictions
+
+
+def evaluate_baseline(y_true: np.ndarray, N_diff: np.ndarray) -> Dict:
+    """
+    Evaluate baseline predictor performance.
+    
+    Args:
+        y_true: True probability values
+        N_diff: Array of N_a - N_b differences
+        
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    y_pred = compute_baseline_predictions(N_diff)
+    
+    results = {
+        'r2': r2_score(y_true, y_pred),
+        'mse': mean_squared_error(y_true, y_pred),
+        'mae': mean_absolute_error(y_true, y_pred)
+    }
+    
+    return results
+
+
 def main():
     import sys
     
@@ -246,6 +290,19 @@ def main():
     print(f"Features: {features}")
     print(f"Probability range: [{y.min():.3f}, {y.max():.3f}]")
     print(f"Sample metadata: {metadata[0] if metadata else 'None'}")
+    print()
+    
+    # Extract N_diff (last column of X)
+    N_diff = X[:, -1]
+    
+    # Evaluate baseline
+    print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
+    baseline_results = evaluate_baseline(y, N_diff)
+    
+    print("\nBaseline results:")
+    print(f"  R² score: {baseline_results['r2']:.4f}")
+    print(f"  MSE: {baseline_results['mse']:.4f}")
+    print(f"  MAE: {baseline_results['mae']:.4f}")
     print()
     
     # Train MLP with cross-validation
