@@ -480,7 +480,7 @@ def compute_exchange_rate_predictions(
     metadata: List[Dict[str, str]],
     exchange_rates: Dict[Tuple[str, str], float],
     N_frac: np.ndarray,
-    tolerance: float = 0.2,
+    tolerance: float = 0.28,
 ) -> np.ndarray:
     """
     Compute predictions based on exchange rates and quantities.
@@ -514,14 +514,13 @@ def compute_exchange_rate_predictions(
             exchange_rate = exchange_rates[(country_a, country_b)]
             # Convert exchange rate to per-unit utility ratio
             # exchange_rate > 1 means country_a needs more units, so utility_per_unit_A = 1/exchange_rate
-            utility_ratio_threshold = 1.0 / exchange_rate
             
+            #TODO Could probably get more meaningful scores, but seems likely that we'll abandon this method anyway.
             # Country A has higher total utility if: N_frac < 1 / exchange_rate
-            #predictions.append(np.clip(1/(n_frac * exchange_rate), 0.0, 1.0))
-            if n_frac < utility_ratio_threshold - tolerance:
+            if 1/n_frac > exchange_rate * (1 + tolerance):
                 # Country A has higher total utility
                 predictions.append(1.0)
-            elif n_frac > utility_ratio_threshold + tolerance:
+            elif 1/n_frac < exchange_rate * (1 - tolerance):
                 # Country B has higher total utility
                 predictions.append(0.0)
             else:
