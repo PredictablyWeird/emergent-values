@@ -1,6 +1,4 @@
 import argparse
-import csv
-import json
 import numpy as np
 from typing import Dict, List, Tuple
 from sklearn.neural_network import MLPClassifier
@@ -14,7 +12,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 from collections import Counter
 
-from decision_modeling_preprocessing import compute_log_utility_predictions
+from decision_modeling_preprocessing import (
+    compute_log_utility_predictions,
+    compute_exchange_rate_predictions,
+    load_country_features,
+    load_decision_file,
+    create_feature_difference_vector,
+    load_exchange_rates,
+    load_utility_curves,
+    compute_baseline_predictions,
+)
 
 
 def map_scores_to_labels(scores: np.ndarray, threshold: float = 0.1) -> np.ndarray:
@@ -127,67 +134,7 @@ def evaluate_classifier_with_cv(
     print(f"Predicted label distribution (OOF): {get_label_distribution(oof_pred_labels)}")
 
 
-def load_country_features(jsonl_path: str) -> Dict[str, Dict[str, float]]:
-    """
-    Load country features from JSONL file.
-    
-    Returns:
-        Dictionary mapping country names to their feature dictionaries.
-    """
-    country_features = {}
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            record = json.loads(line.strip())
-            country_name = record['country']
-            features = record['features']
-            country_features[country_name] = features
-    return country_features
-
-
-def load_decision_file(csv_path: str) -> List[Tuple[float, str, float, str, float]]:
-    """
-    Load decision file (CSV) with country comparisons.
-    
-    Returns:
-        List of tuples: (N_a, country_a, N_b, country_b, probability)
-    """
-    decisions = []
-    with open(csv_path, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            # CSV format: N_a, country_a, N_b, country_b, probability
-            if len(row) >= 5:
-                N_a = float(row[0])
-                country_a = row[1]
-                N_b = float(row[2])
-                country_b = row[3]
-                probability = float(row[4])
-                decisions.append((N_a, country_a, N_b, country_b, probability))
-    return decisions
-
-
-def create_feature_difference_vector(
-    country_a_features: Dict[str, float],
-    country_b_features: Dict[str, float],
-    feature_names: List[str]
-) -> np.ndarray:
-    """
-    Create feature difference vector: country_a_features - country_b_features.
-    
-    Args:
-        country_a_features: Feature dictionary for country A
-        country_b_features: Feature dictionary for country B
-        feature_names: Ordered list of feature names
-        
-    Returns:
-        Numpy array with feature differences
-    """
-    diff_vector = []
-    for feature_name in feature_names:
-        value_a = country_a_features.get(feature_name, 0.0)
-        value_b = country_b_features.get(feature_name, 0.0)
-        diff_vector.append(value_a - value_b)
-    return np.array(diff_vector)
+ 
 
 
 def preprocess_decision_data(
@@ -494,24 +441,7 @@ def train_mlp_with_cv(
     return results
 
 
-def compute_baseline_predictions(N_diff: np.ndarray) -> np.ndarray:
-    """
-    Compute baseline predictions based on N_a vs N_b comparison.
-    
-    Args:
-        N_diff: Array of N_a - N_b differences
-        
-    Returns:
-        Array of baseline predictions:
-        - 1.0 if N_a > N_b (N_diff > 0)
-        - 0.0 if N_a < N_b (N_diff < 0)
-        - 0.5 if N_a == N_b (N_diff == 0)
-    """
-    predictions = np.zeros_like(N_diff)
-    predictions[N_diff > 0] = 1.0
-    predictions[N_diff < 0] = 0.0
-    predictions[N_diff == 0] = 0.5
-    return predictions
+ 
 
 
 def evaluate_baseline(y_true: np.ndarray, N_diff: np.ndarray, threshold: float = 0.1) -> Dict:
@@ -553,120 +483,7 @@ def evaluate_baseline(y_true: np.ndarray, N_diff: np.ndarray, threshold: float =
     return results
 
 
-def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchange_rates/results",
-                       category: str = "countries", measure: str = "terminal_illness") -> Dict[Tuple[str, str], float]:
-    """
-    Load exchange rates for countries from exchange rate results.
-    
-    Args:
-        model_name: Model name
-        results_dir: Directory containing exchange rate results
-        category: Category (e.g., 'countries')
-        measure: Measure (e.g., 'terminal_illness')
-        
-    Returns:
-        Dictionary mapping (country_a, country_b) tuples to exchange rate ratios.
-        Returns empty dict if data not available.
-    """
-    import os
-    import sys
-    import math
-    
-    # Add path to import from create_exchange_rates_plots
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    
-    try:
-        from create_exchange_rates_plots import (
-            load_thurstonian_results, fit_utility_curves, two_way_geometric_exchange_rate
-        )
-        from experiments.exchange_rates.evaluate_exchange_rates import N_values  # noqa: F401
-    except ImportError:
-        return {}
-    
-    model_save_dir = os.path.join(results_dir, model_name)
-    if not os.path.exists(model_save_dir):
-        return {}
-    
-    try:
-        df, measure_vals = load_thurstonian_results(model_save_dir, category, measure)
-        slopes, intercepts = fit_utility_curves(df, return_mse=False)
-    except (FileNotFoundError, ValueError):
-        return {}
-    
-    # Build exchange rate dictionary
-    exchange_rates = {}
-    countries = list(slopes.keys())
-    
-    for country_a in countries:
-        for country_b in countries:
-            if country_a == country_b:
-                continue
-            exchange_rate = two_way_geometric_exchange_rate(
-                country_a, country_b, measure_vals,
-                slopes, intercepts,
-                skip_if_negative_slope=False,
-                allow_negative_slopes=True
-            )
-            if exchange_rate is not None and not math.isinf(exchange_rate):
-                exchange_rates[(country_a, country_b)] = exchange_rate
-    
-    return exchange_rates
-
-
-def compute_exchange_rate_predictions(
-    metadata: List[Dict[str, str]],
-    exchange_rates: Dict[Tuple[str, str], float],
-    N_frac: np.ndarray,
-    tolerance: float = 0.28,
-) -> np.ndarray:
-    """
-    Compute predictions based on exchange rates and quantities.
-    
-    Exchange rate interpretation:
-    - exchange_rate(country_a, country_b) = r means: r units of country_a = 1 unit of country_b
-    - So N_a units of country_a = N_a / r units of country_b utility
-    - N_b units of country_b = N_b units of country_b utility
-    - Country A has higher total utility if: N_a / r > N_b
-    - Which rearranges to: N_a / N_b > r, or N_b / N_a < 1 / r
-    - Since N_frac = N_b / N_a, we compare: N_frac vs 1 / exchange_rate
-    
-    Args:
-        metadata: List of dictionaries with 'country_a' and 'country_b' keys
-        exchange_rates: Dictionary mapping (country_a, country_b) to exchange rate
-        N_frac: Array of N_b / N_a ratios
-        
-    Returns:
-        Array of predictions (probabilities)
-    """
-    predictions = []
-    
-    for i, meta in enumerate(metadata):
-        country_a = meta['country_a']
-        country_b = meta['country_b']
-        n_frac = N_frac[i]
-        
-        # Check if we have exchange rate for this pair
-        if (country_a, country_b) in exchange_rates:
-            exchange_rate = exchange_rates[(country_a, country_b)]
-            # Convert exchange rate to per-unit utility ratio
-            # exchange_rate > 1 means country_a needs more units, so utility_per_unit_A = 1/exchange_rate
-            #utility_ratio_threshold = 1.0 / exchange_rate
-            
-            # Country A has higher total utility if: N_frac < 1 / exchange_rate
-            if 1/n_frac > exchange_rate * (1 + tolerance):
-                # Country A has higher total utility
-                predictions.append(1.0)
-            elif 1/n_frac < exchange_rate * (1 - tolerance):
-                # Country B has higher total utility
-                predictions.append(0.0)
-            else:
-                # Equal total utility
-                predictions.append(0.5)
-        else:
-            # Exchange rate not available, predict 0.5
-            predictions.append(0.5)
-    
-    return np.array(predictions)
+ 
 
 
 def evaluate_exchange_rate_method(
@@ -717,46 +534,7 @@ def evaluate_exchange_rate_method(
     return results
 
 
-def load_utility_curves(model_name: str, results_dir: str = "experiments/exchange_rates/results",
-                        category: str = "countries", measure: str = "terminal_illness") -> Tuple[Dict[str, float], Dict[str, float]]:
-    """
-    Load utility curve slopes and intercepts for countries from exchange rate results.
-    
-    Utility curves are of the form: utility = intercept + slope * ln(N)
-    
-    Args:
-        model_name: Model name
-        results_dir: Directory containing exchange rate results
-        category: Category (e.g., 'countries')
-        measure: Measure (e.g., 'terminal_illness')
-        
-    Returns:
-        Tuple of (slopes, intercepts) dictionaries mapping country names to their slope/intercept values.
-        Returns (empty dict, empty dict) if data not available.
-    """
-    import os
-    import sys
-    
-    # Add path to import from create_exchange_rates_plots
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    
-    try:
-        from create_exchange_rates_plots import (
-            load_thurstonian_results, fit_utility_curves
-        )
-    except ImportError:
-        return {}, {}
-    
-    model_save_dir = os.path.join(results_dir, model_name)
-    if not os.path.exists(model_save_dir):
-        return {}, {}
-    
-    try:
-        df, measure_vals = load_thurstonian_results(model_save_dir, category, measure)
-        slopes, intercepts = fit_utility_curves(df, return_mse=False)
-        return slopes, intercepts
-    except (FileNotFoundError, ValueError):
-        return {}, {}
+ 
 
 
 def evaluate_log_utility_method(
