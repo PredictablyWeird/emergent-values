@@ -1,11 +1,12 @@
 import argparse
 import numpy as np
+import pathlib
 from typing import Dict, List, Tuple
 from sklearn.neural_network import MLPClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import export_text
 from sklearn.model_selection import cross_validate
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, GroupKFold
 from sklearn.base import clone
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
@@ -71,18 +72,27 @@ def evaluate_classifier_with_cv(
     cv_folds: int = 5,
     random_state: int = 42,
     y_is_encoded: bool = False,
-    label_encoder: LabelEncoder = None
+    label_encoder: LabelEncoder = None,
+    groups: np.ndarray = None
 ) -> None:
     """
-    Evaluate a classifier using Stratified K-Fold cross-validation.
-    Prints mean±std metrics across folds and the out-of-fold confusion matrix.
+    Evaluate a classifier using group-based K-Fold cross-validation.
+    Groups partition the data by country_x so all rows sharing a country_x
+    stay in the same fold. Prints mean±std metrics across folds and the
+    out-of-fold confusion matrix.
     """
-    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+    if groups is None:
+        # Fallback to stratified if groups not provided
+        splitter = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+        split_iter = splitter.split(X, y_labels)
+    else:
+        splitter = GroupKFold(n_splits=cv_folds)
+        split_iter = splitter.split(X, y_labels, groups=groups)
 
     per_fold_metrics = []  # list of dicts with accuracy, precision/recall/f1 per-class (macro for summary)
     oof_pred_labels = np.empty_like(y_labels, dtype=object)
 
-    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y_labels)):
+    for fold_idx, (train_idx, val_idx) in enumerate(split_iter):
         model = clone(pipeline)
         if y_is_encoded:
             # Encode using provided encoder
@@ -213,9 +223,13 @@ def preprocess_decision_data(
         
         X_rows.append(feature_vector)
         y_values.append(probability)
+        # Define category as alphabetically sorted tuple of (country_a, country_b)
+        country_x, country_y = sorted([country_a, country_b])
         metadata_list.append({
             "country_a": country_a,
-            "country_b": country_b
+            "country_b": country_b,
+            "country_x": country_x,
+            "country_y": country_y
         })
         N_a_values.append(N_a)
         N_b_values.append(N_b)
@@ -745,6 +759,8 @@ def evaluate_all_methods(
         print(f"Evaluating MLP classifier with 5-fold CV on discrete labels (alpha={alpha})...")
         label_encoder = LabelEncoder()
         label_encoder.fit(y_labels)
+        # Partition by country_x for CV
+        groups = np.array([m["country_x"] for m in metadata])
         pipeline = create_mlp_pipeline(
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
@@ -760,7 +776,8 @@ def evaluate_all_methods(
             cv_folds=5,
             random_state=random_state,
             y_is_encoded=True,
-            label_encoder=label_encoder
+            label_encoder=label_encoder,
+            groups=groups
         )
     
     # Decision Tree classifier with 5-fold CV on discrete labels
@@ -772,6 +789,8 @@ def evaluate_all_methods(
             min_samples_leaf=min_samples_leaf,
             random_state=random_state
         )
+        # Partition by country_x for CV
+        groups = np.array([m["country_x"] for m in metadata])
         evaluate_classifier_with_cv(
             name="Decision Tree",
             pipeline=pipeline,
@@ -781,7 +800,8 @@ def evaluate_all_methods(
             cv_folds=5,
             random_state=random_state,
             y_is_encoded=False,
-            label_encoder=None
+            label_encoder=None,
+            groups=groups
         )
 
 
@@ -1000,8 +1020,9 @@ def parse_args():
     )
     
     parser.add_argument(
-        "model_name",
+        "--model-name",
         type=str,
+        default="gpt-4o-mini",
         help="Model name (used to construct CSV and JSONL file paths)"
     )
     
@@ -1104,8 +1125,9 @@ def main():
     #methods = ["baseline", "exchange_rates", "log_utility"]
     
     # Set default file paths if not provided
-    csv_path = args.csv_path or f"{args.model_name}-country_vs_country.csv"
-    jsonl_path = args.jsonl_path or f"country_features_{args.model_name}.jsonl"
+    base_dir = pathlib.Path(__file__).parent.parent.parent
+    csv_path = args.csv_path or base_dir / f"{args.model_name}-country_vs_country.csv"
+    jsonl_path = args.jsonl_path or base_dir / f"country_features_{args.model_name}.jsonl"
     
     # Prepare MLP hyperparameters
     hidden_layer_sizes = (args.hidden_dim,)

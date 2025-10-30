@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import pathlib
 import numpy as np
 from typing import Dict, List, Tuple
 from scipy.special import expit
@@ -416,7 +417,7 @@ def evaluate_baseline(y_true: np.ndarray, N_diff: np.ndarray) -> Dict:
     return results
 
 
-def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchange_rates/results",
+def load_exchange_rates(model_name: str, results_dir: str | None = None,
                        category: str = "countries", measure: str = "terminal_illness") -> Dict[Tuple[str, str], float]:
     """
     Load exchange rates for countries from exchange rate results.
@@ -436,7 +437,8 @@ def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchang
     import math
     
     # Add path to import from create_exchange_rates_plots
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    base_dir = pathlib.Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(base_dir))
     
     try:
         from create_exchange_rates_plots import (
@@ -445,6 +447,9 @@ def load_exchange_rates(model_name: str, results_dir: str = "experiments/exchang
         from experiments.exchange_rates.evaluate_exchange_rates import N_values  # noqa: F401
     except ImportError:
         return {}
+    
+    if results_dir is None:
+        results_dir = base_dir / "experiments" / "exchange_rates" / "results"
     
     model_save_dir = os.path.join(results_dir, model_name)
     if not os.path.exists(model_save_dir):
@@ -563,7 +568,7 @@ def evaluate_exchange_rate_method(
     return results
 
 
-def load_utility_curves(model_name: str, results_dir: str = "experiments/exchange_rates/results",
+def load_utility_curves(model_name: str, results_dir: str | None = None,
                         category: str = "countries", measure: str = "terminal_illness") -> Tuple[Dict[str, float], Dict[str, float]]:
     """
     Load utility curve slopes and intercepts for countries from exchange rate results.
@@ -584,7 +589,8 @@ def load_utility_curves(model_name: str, results_dir: str = "experiments/exchang
     import sys
     
     # Add path to import from create_exchange_rates_plots
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    base_dir = pathlib.Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(base_dir))
     
     try:
         from create_exchange_rates_plots import (
@@ -592,6 +598,9 @@ def load_utility_curves(model_name: str, results_dir: str = "experiments/exchang
         )
     except ImportError:
         return {}, {}
+
+    if results_dir is None:
+        results_dir = base_dir / "experiments" / "exchange_rates" / "results"
     
     model_save_dir = os.path.join(results_dir, model_name)
     if not os.path.exists(model_save_dir):

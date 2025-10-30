@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import pathlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,7 +12,7 @@ import sys
 
 from matplotlib.colors import LogNorm
 
-sys.path.append('experiments/exchange_rates')
+sys.path.append(str(pathlib.Path(__file__).parent / 'experiments' / 'exchange_rates'))
 from evaluate_exchange_rates import X_values, N_values, inflect_option
 
 model_key_to_name = {
