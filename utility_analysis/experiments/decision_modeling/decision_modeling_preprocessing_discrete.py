@@ -7,6 +7,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import export_text
 from sklearn.model_selection import cross_validate
+from sklearn.model_selection import StratifiedKFold
+from sklearn.base import clone
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
@@ -51,6 +53,78 @@ def get_label_distribution(labels: np.ndarray) -> Dict[str, int]:
         Dictionary mapping label to count
     """
     return dict(Counter(labels))
+
+
+def evaluate_classifier_with_cv(
+    name: str,
+    pipeline: Pipeline,
+    X: np.ndarray,
+    y_labels: np.ndarray,
+    label_order: List[str],
+    cv_folds: int = 5,
+    random_state: int = 42,
+    y_is_encoded: bool = False,
+    label_encoder: LabelEncoder = None
+) -> None:
+    """
+    Evaluate a classifier using Stratified K-Fold cross-validation.
+    Prints mean±std metrics across folds and the out-of-fold confusion matrix.
+    """
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+
+    per_fold_metrics = []  # list of dicts with accuracy, precision/recall/f1 per-class (macro for summary)
+    oof_pred_labels = np.empty_like(y_labels, dtype=object)
+
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y_labels)):
+        model = clone(pipeline)
+        if y_is_encoded:
+            # Encode using provided encoder
+            y_train_enc = label_encoder.transform(y_labels[train_idx])
+            model.fit(X[train_idx], y_train_enc)
+            y_val_pred_enc = model.predict(X[val_idx])
+            y_val_pred = label_encoder.inverse_transform(y_val_pred_enc)
+        else:
+            model.fit(X[train_idx], y_labels[train_idx])
+            y_val_pred = model.predict(X[val_idx])
+
+        y_true_val = y_labels[val_idx]
+        oof_pred_labels[val_idx] = y_val_pred
+
+        accuracy = accuracy_score(y_true_val, y_val_pred)
+        precision, recall, f1, support = precision_recall_fscore_support(
+            y_true_val, y_val_pred, labels=label_order, zero_division=0
+        )
+
+        per_fold_metrics.append({
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
+            'support': support
+        })
+
+    # Aggregate per-fold metrics (means and stds)
+    accuracies = np.array([m['accuracy'] for m in per_fold_metrics])
+    precisions = np.stack([m['precision'] for m in per_fold_metrics], axis=0)
+    recalls = np.stack([m['recall'] for m in per_fold_metrics], axis=0)
+    f1s = np.stack([m['f1'] for m in per_fold_metrics], axis=0)
+
+    print(f"\n{name} (5-fold CV) results:")
+    print(f"  Accuracy: {accuracies.mean():.4f} ± {accuracies.std():.4f}")
+
+    print("\nPer-class metrics (mean ± std across folds):")
+    for i, label in enumerate(label_order):
+        print(f"  {label}:")
+        print(f"    Precision: {precisions[:, i].mean():.4f} ± {precisions[:, i].std():.4f}")
+        print(f"    Recall:    {recalls[:, i].mean():.4f} ± {recalls[:, i].std():.4f}")
+        print(f"    F1-score:  {f1s[:, i].mean():.4f} ± {f1s[:, i].std():.4f}")
+
+    # Out-of-fold confusion matrix and distributions
+    cm_oof = confusion_matrix(y_labels, oof_pred_labels, labels=label_order)
+    print("\nOut-of-fold confusion matrix:")
+    print(f"  {cm_oof}")
+    print(f"\nTrue label distribution: {get_label_distribution(y_labels)}")
+    print(f"Predicted label distribution (OOF): {get_label_distribution(oof_pred_labels)}")
 
 
 def load_country_features(jsonl_path: str) -> Dict[str, Dict[str, float]]:
@@ -579,12 +653,9 @@ def compute_exchange_rate_predictions(
             #utility_ratio_threshold = 1.0 / exchange_rate
             
             # Country A has higher total utility if: N_frac < 1 / exchange_rate
-            #predictions.append(np.clip(1/(n_frac * exchange_rate), 0.0, 1.0))
-            #if n_frac < utility_ratio_threshold * (1 - tolerance):
             if 1/n_frac > exchange_rate * (1 + tolerance):
                 # Country A has higher total utility
                 predictions.append(1.0)
-            #elif n_frac > utility_ratio_threshold * (1 + tolerance):
             elif 1/n_frac < exchange_rate * (1 - tolerance):
                 # Country B has higher total utility
                 predictions.append(0.0)
@@ -891,85 +962,49 @@ def evaluate_all_methods(
             print("Utility curve data not available - skipping log utility evaluation")
             print()
     
-    # Train MLP classifier on discrete labels
+    # MLP classifier with 5-fold CV on discrete labels
     if "mlp" in methods:
-        print(f"Training MLP classifier on discrete labels (L2 regularization, alpha={alpha})...")
-        # Encode string labels to numeric values for MLPClassifier
+        print(f"Evaluating MLP classifier with 5-fold CV on discrete labels (alpha={alpha})...")
         label_encoder = LabelEncoder()
-        y_labels_encoded = label_encoder.fit_transform(y_labels)
-        
+        label_encoder.fit(y_labels)
         pipeline = create_mlp_pipeline(
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
             random_state=random_state,
             alpha=alpha
         )
-        # Train directly on encoded discrete labels
-        pipeline.fit(X, y_labels_encoded)
-        y_pred_encoded = pipeline.predict(X)
-        
-        # Decode predictions back to string labels
-        y_pred_labels = label_encoder.inverse_transform(y_pred_encoded)
-        
-        # Classification metrics
-        accuracy = accuracy_score(y_labels, y_pred_labels)
-        precision, recall, f1, support = precision_recall_fscore_support(
-            y_labels, y_pred_labels, labels=['A', 'B', 'ambiguous'], zero_division=0
+        evaluate_classifier_with_cv(
+            name="MLP",
+            pipeline=pipeline,
+            X=X,
+            y_labels=y_labels,
+            label_order=['A', 'B', 'ambiguous'],
+            cv_folds=5,
+            random_state=random_state,
+            y_is_encoded=True,
+            label_encoder=label_encoder
         )
-        cm = confusion_matrix(y_labels, y_pred_labels, labels=['A', 'B', 'ambiguous'])
-        
-        print("\nMLP results:")
-        print(f"Hidden layer sizes: {hidden_layer_sizes}")
-        print(f"Alpha (L2 regularization): {alpha}")
-        print(f"Accuracy: {accuracy:.4f}")
-        print("\nPer-class metrics:")
-        for label in ['A', 'B', 'ambiguous']:
-            print(f"  {label}:")
-            print(f"    Precision: {dict(zip(['A', 'B', 'ambiguous'], precision))[label]:.4f}")
-            print(f"    Recall: {dict(zip(['A', 'B', 'ambiguous'], recall))[label]:.4f}")
-            print(f"    F1-score: {dict(zip(['A', 'B', 'ambiguous'], f1))[label]:.4f}")
-            print(f"    Support: {dict(zip(['A', 'B', 'ambiguous'], support))[label]}")
-        print("\nConfusion matrix:")
-        print(f"  {cm}")
-        print(f"\nPredicted label distribution: {get_label_distribution(y_pred_labels)}")
-        print()
     
-    # Train Decision Tree classifier on discrete labels
+    # Decision Tree classifier with 5-fold CV on discrete labels
     if "decision_tree" in methods:
-        print(f"Training Decision Tree classifier on discrete labels (max_depth={max_depth})...")
+        print(f"Evaluating Decision Tree classifier with 5-fold CV on discrete labels (max_depth={max_depth})...")
         pipeline = create_decision_tree_pipeline(
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
             random_state=random_state
         )
-        # Train directly on discrete labels
-        pipeline.fit(X, y_labels)
-        y_pred_labels = pipeline.predict(X)
-        
-        # Classification metrics
-        accuracy = accuracy_score(y_labels, y_pred_labels)
-        precision, recall, f1, support = precision_recall_fscore_support(
-            y_labels, y_pred_labels, labels=['A', 'B', 'ambiguous'], zero_division=0
+        evaluate_classifier_with_cv(
+            name="Decision Tree",
+            pipeline=pipeline,
+            X=X,
+            y_labels=y_labels,
+            label_order=['A', 'B', 'ambiguous'],
+            cv_folds=5,
+            random_state=random_state,
+            y_is_encoded=False,
+            label_encoder=None
         )
-        cm = confusion_matrix(y_labels, y_pred_labels, labels=['A', 'B', 'ambiguous'])
-        
-        print("\nDecision Tree results:")
-        print(f"Max depth: {max_depth}")
-        print(f"Min samples split: {min_samples_split}")
-        print(f"Min samples leaf: {min_samples_leaf}")
-        print(f"Accuracy: {accuracy:.4f}")
-        print("\nPer-class metrics:")
-        for label in ['A', 'B', 'ambiguous']:
-            print(f"  {label}:")
-            print(f"    Precision: {dict(zip(['A', 'B', 'ambiguous'], precision))[label]:.4f}")
-            print(f"    Recall: {dict(zip(['A', 'B', 'ambiguous'], recall))[label]:.4f}")
-            print(f"    F1-score: {dict(zip(['A', 'B', 'ambiguous'], f1))[label]:.4f}")
-            print(f"    Support: {dict(zip(['A', 'B', 'ambiguous'], support))[label]}")
-        print("\nConfusion matrix:")
-        print(f"  {cm}")
-        print(f"\nPredicted label distribution: {get_label_distribution(y_pred_labels)}")
-        print()
 
 
 def print_data_summary(X: np.ndarray, y: np.ndarray, y_labels: np.ndarray, features: List[str], metadata: List[Dict[str, str]], threshold: float = 0.1) -> None:
