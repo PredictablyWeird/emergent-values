@@ -16,12 +16,80 @@ from predictors import (
 from models import (
     train_mlp_with_cv,
     train_decision_tree_with_cv,
+    train_exchange_rates_with_cv,
+    train_log_utility_with_cv,
     create_mlp_classifier_pipeline,
     create_decision_tree_classifier_pipeline,
 )
 from evaluation.classification_cv import evaluate_classifier_with_cv
 from data.preprocessing_discrete import get_label_distribution
 from sklearn.preprocessing import LabelEncoder
+
+
+def _print_regression_results(results: Dict, method_name: str) -> None:
+    """Helper function to print regression results (R², MSE, MAE)."""
+    print(f"\n{method_name} results:")
+    print(f"  R² score: {results['r2']:.4f}")
+    print(f"  MSE: {results['mse']:.4f}")
+    print(f"  MAE: {results['mae']:.4f}")
+    if 'coverage' in results:
+        print(f"  Coverage: {results['coverage']:.2%}")
+    print()
+
+
+def _print_cv_regression_results(results: Dict, method_name: str) -> None:
+    """Helper function to print CV regression results."""
+    print(f"\n{method_name} Cross-validation results ({results['cv_folds']}-fold CV):")
+    
+    # Print hyperparameters if present
+    if 'hidden_layer_sizes' in results:
+        print(f"Hidden layer sizes: {results['hidden_layer_sizes']}")
+    if 'alpha' in results:
+        print(f"Alpha (L2 regularization): {results['alpha']}")
+    if 'max_depth' in results:
+        print(f"Max depth: {results['max_depth']}")
+    if 'min_samples_split' in results:
+        print(f"Min samples split: {results['min_samples_split']}")
+    if 'min_samples_leaf' in results:
+        print(f"Min samples leaf: {results['min_samples_leaf']}")
+    if 'scale' in results:
+        print(f"Scale: {results['scale']}")
+    if 'method' in results:
+        print(f"Method: {results['method']}")
+    if 'tolerance' in results:
+        print(f"Tolerance: {results['tolerance']}")
+    print()
+    
+    print("Test scores:")
+    print(f"  R² score: {results['test_r2_mean']:.4f} ± {results['test_r2_std']:.4f}")
+    print(f"  MSE: {results['test_mse_mean']:.4f} ± {results['test_mse_std']:.4f}")
+    print(f"  MAE: {results['test_mae_mean']:.4f} ± {results['test_mae_std']:.4f}")
+    print()
+    print("Train scores:")
+    print(f"  R² score: {results['train_r2_mean']:.4f} ± {results['train_r2_std']:.4f}")
+    print(f"  MSE: {results['train_mse_mean']:.4f} ± {results['train_mse_std']:.4f}")
+    print(f"  MAE: {results['train_mae_mean']:.4f} ± {results['train_mae_std']:.4f}")
+    print()
+
+
+def _print_classification_results(results: Dict, method_name: str) -> None:
+    """Helper function to print classification results."""
+    print(f"\n{method_name} results:")
+    print(f"  Accuracy: {results['accuracy']:.4f}")
+    if 'coverage' in results:
+        print(f"  Coverage: {results['coverage']:.2%}")
+    print("\nPer-class metrics:")
+    for label in ['A', 'B', 'ambiguous']:
+        print(f"  {label}:")
+        print(f"    Precision: {results['precision'][label]:.4f}")
+        print(f"    Recall: {results['recall'][label]:.4f}")
+        print(f"    F1-score: {results['f1'][label]:.4f}")
+        print(f"    Support: {results['support'][label]}")
+    print("\nConfusion matrix:")
+    print(f"  {results['confusion_matrix']}")
+    print(f"\nTrue label distribution: {results['true_label_distribution']}")
+    print(f"Predicted label distribution: {results['pred_label_distribution']}")
+    print()
 
 
 def print_data_summary(
@@ -94,12 +162,7 @@ def evaluate_all_methods(
     if "baseline" in methods:
         print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
         baseline_results = evaluate_baseline(y, N_diff)
-        
-        print("\nBaseline results:")
-        print(f"  R² score: {baseline_results['r2']:.4f}")
-        print(f"  MSE: {baseline_results['mse']:.4f}")
-        print(f"  MAE: {baseline_results['mae']:.4f}")
-        print()
+        _print_regression_results(baseline_results, "Baseline")
     
     # Try to load exchange rates and evaluate exchange rate method
     if "exchange_rates" in methods:
@@ -112,13 +175,7 @@ def evaluate_all_methods(
             exchange_results = evaluate_exchange_rate_method(
                 y, metadata, exchange_rates, N_frac
             )
-            
-            print("\nExchange rate method results:")
-            print(f"  R² score: {exchange_results['r2']:.4f}")
-            print(f"  MSE: {exchange_results['mse']:.4f}")
-            print(f"  MAE: {exchange_results['mae']:.4f}")
-            print(f"  Coverage: {exchange_results['coverage']:.2%}")
-            print()
+            _print_regression_results(exchange_results, "Exchange rate method")
         else:
             print("Exchange rate data not available - skipping exchange rate evaluation")
             print()
@@ -135,16 +192,35 @@ def evaluate_all_methods(
                 y, metadata, slopes, intercepts, N_a, N_b, 
                 scale=log_utility_scale, method=log_utility_method
             )
-            
-            print("\nLog utility method results:")
-            print(f"  R² score: {log_utility_results['r2']:.4f}")
-            print(f"  MSE: {log_utility_results['mse']:.4f}")
-            print(f"  MAE: {log_utility_results['mae']:.4f}")
-            print(f"  Coverage: {log_utility_results['coverage']:.2%}")
-            print()
+            _print_regression_results(log_utility_results, "Log utility method")
         else:
             print("Utility curve data not available - skipping log utility evaluation")
             print()
+    
+    # Train exchange rate model with cross-validation (fits utility curves from training data)
+    if "exchange_rates_cv" in methods:
+        print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        exchange_cv_results = train_exchange_rates_with_cv(
+            X, y, metadata, N_a, N_b, N_frac,
+            cv_folds=5,
+            random_state=random_state,
+            scale=log_utility_scale,
+            method=log_utility_method,
+            tolerance=0.28
+        )
+        _print_cv_regression_results(exchange_cv_results, "Exchange Rate")
+    
+    # Train log utility model with cross-validation (fits utility curves from training data)
+    if "log_utility_cv" in methods:
+        print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        log_utility_cv_results = train_log_utility_with_cv(
+            X, y, metadata, N_a, N_b,
+            cv_folds=5,
+            random_state=random_state,
+            scale=log_utility_scale,
+            method=log_utility_method
+        )
+        _print_cv_regression_results(log_utility_cv_results, "Log Utility")
     
     # Train MLP with cross-validation
     if "mlp" in methods:
@@ -156,21 +232,7 @@ def evaluate_all_methods(
             random_state=random_state,
             alpha=alpha
         )
-        
-        print(f"\nMLP Cross-validation results ({cv_results['cv_folds']}-fold CV):")
-        print(f"Hidden layer sizes: {cv_results['hidden_layer_sizes']}")
-        print(f"Alpha (L2 regularization): {cv_results['alpha']}")
-        print()
-        print("Test scores:")
-        print(f"  R² score: {cv_results['test_r2_mean']:.4f} ± {cv_results['test_r2_std']:.4f}")
-        print(f"  MSE: {cv_results['test_mse_mean']:.4f} ± {cv_results['test_mse_std']:.4f}")
-        print(f"  MAE: {cv_results['test_mae_mean']:.4f} ± {cv_results['test_mae_std']:.4f}")
-        print()
-        print("Train scores:")
-        print(f"  R² score: {cv_results['train_r2_mean']:.4f} ± {cv_results['train_r2_std']:.4f}")
-        print(f"  MSE: {cv_results['train_mse_mean']:.4f} ± {cv_results['train_mse_std']:.4f}")
-        print(f"  MAE: {cv_results['train_mae_mean']:.4f} ± {cv_results['train_mae_std']:.4f}")
-        print()
+        _print_cv_regression_results(cv_results, "MLP")
     
     # Train Decision Tree with cross-validation
     if "decision_tree" in methods:
@@ -182,22 +244,7 @@ def evaluate_all_methods(
             min_samples_leaf=min_samples_leaf,
             random_state=random_state
         )
-        
-        print(f"\nDecision Tree Cross-validation results ({dt_results['cv_folds']}-fold CV):")
-        print(f"Max depth: {dt_results['max_depth']}")
-        print(f"Min samples split: {dt_results['min_samples_split']}")
-        print(f"Min samples leaf: {dt_results['min_samples_leaf']}")
-        print()
-        print("Test scores:")
-        print(f"  R² score: {dt_results['test_r2_mean']:.4f} ± {dt_results['test_r2_std']:.4f}")
-        print(f"  MSE: {dt_results['test_mse_mean']:.4f} ± {dt_results['test_mse_std']:.4f}")
-        print(f"  MAE: {dt_results['test_mae_mean']:.4f} ± {dt_results['test_mae_std']:.4f}")
-        print()
-        print("Train scores:")
-        print(f"  R² score: {dt_results['train_r2_mean']:.4f} ± {dt_results['train_r2_std']:.4f}")
-        print(f"  MSE: {dt_results['train_mse_mean']:.4f} ± {dt_results['train_mse_std']:.4f}")
-        print(f"  MAE: {dt_results['train_mae_mean']:.4f} ± {dt_results['train_mae_std']:.4f}")
-        print()
+        _print_cv_regression_results(dt_results, "Decision Tree")
 
 
 def evaluate_equal_n_subset(
@@ -326,21 +373,7 @@ def evaluate_all_methods_discrete(
     if "baseline" in methods:
         print("Evaluating baseline predictor (predicts 1 if N_a > N_b, 0 if N_a < N_b, 0.5 if N_a == N_b)...")
         baseline_results = evaluate_baseline_discrete(y, N_diff, threshold)
-        
-        print("\nBaseline results:")
-        print(f"  Accuracy: {baseline_results['accuracy']:.4f}")
-        print("\nPer-class metrics:")
-        for label in ['A', 'B', 'ambiguous']:
-            print(f"  {label}:")
-            print(f"    Precision: {baseline_results['precision'][label]:.4f}")
-            print(f"    Recall: {baseline_results['recall'][label]:.4f}")
-            print(f"    F1-score: {baseline_results['f1'][label]:.4f}")
-            print(f"    Support: {baseline_results['support'][label]}")
-        print("\nConfusion matrix:")
-        print(f"  {baseline_results['confusion_matrix']}")
-        print(f"\nTrue label distribution: {baseline_results['true_label_distribution']}")
-        print(f"Predicted label distribution: {baseline_results['pred_label_distribution']}")
-        print()
+        _print_classification_results(baseline_results, "Baseline")
     
     # Try to load exchange rates and evaluate exchange rate method
     if "exchange_rates" in methods:
@@ -353,22 +386,7 @@ def evaluate_all_methods_discrete(
             exchange_results = evaluate_exchange_rate_method_discrete(
                 y, metadata, exchange_rates, N_frac, threshold
             )
-            
-            print("\nExchange rate method results:")
-            print(f"  Accuracy: {exchange_results['accuracy']:.4f}")
-            print(f"  Coverage: {exchange_results['coverage']:.2%}")
-            print("\nPer-class metrics:")
-            for label in ['A', 'B', 'ambiguous']:
-                print(f"  {label}:")
-                print(f"    Precision: {exchange_results['precision'][label]:.4f}")
-                print(f"    Recall: {exchange_results['recall'][label]:.4f}")
-                print(f"    F1-score: {exchange_results['f1'][label]:.4f}")
-                print(f"    Support: {exchange_results['support'][label]}")
-            print("\nConfusion matrix:")
-            print(f"  {exchange_results['confusion_matrix']}")
-            print(f"\nTrue label distribution: {exchange_results['true_label_distribution']}")
-            print(f"Predicted label distribution: {exchange_results['pred_label_distribution']}")
-            print()
+            _print_classification_results(exchange_results, "Exchange rate method")
         else:
             print("Exchange rate data not available - skipping exchange rate evaluation")
             print()
@@ -385,25 +403,36 @@ def evaluate_all_methods_discrete(
                 y, metadata, slopes, intercepts, N_a, N_b, threshold,
                 scale=log_utility_scale, method=log_utility_method
             )
-            
-            print("\nLog utility method results:")
-            print(f"  Accuracy: {log_utility_results['accuracy']:.4f}")
-            print(f"  Coverage: {log_utility_results['coverage']:.2%}")
-            print("\nPer-class metrics:")
-            for label in ['A', 'B', 'ambiguous']:
-                print(f"  {label}:")
-                print(f"    Precision: {log_utility_results['precision'][label]:.4f}")
-                print(f"    Recall: {log_utility_results['recall'][label]:.4f}")
-                print(f"    F1-score: {log_utility_results['f1'][label]:.4f}")
-                print(f"    Support: {log_utility_results['support'][label]}")
-            print("\nConfusion matrix:")
-            print(f"  {log_utility_results['confusion_matrix']}")
-            print(f"\nTrue label distribution: {log_utility_results['true_label_distribution']}")
-            print(f"Predicted label distribution: {log_utility_results['pred_label_distribution']}")
-            print()
+            _print_classification_results(log_utility_results, "Log utility method")
         else:
             print("Utility curve data not available - skipping log utility evaluation")
             print()
+    
+    # Train exchange rate model with cross-validation (fits utility curves from training data)
+    if "exchange_rates_cv" in methods:
+        print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        exchange_cv_results = train_exchange_rates_with_cv(
+            X, y, metadata, N_a, N_b, N_frac,
+            cv_folds=5,
+            random_state=random_state,
+            scale=log_utility_scale,
+            method=log_utility_method,
+            tolerance=0.28
+        )
+        # Note: CV methods return regression metrics, but we can still use them
+        _print_cv_regression_results(exchange_cv_results, "Exchange Rate")
+    
+    # Train log utility model with cross-validation (fits utility curves from training data)
+    if "log_utility_cv" in methods:
+        print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        log_utility_cv_results = train_log_utility_with_cv(
+            X, y, metadata, N_a, N_b,
+            cv_folds=5,
+            random_state=random_state,
+            scale=log_utility_scale,
+            method=log_utility_method
+        )
+        _print_cv_regression_results(log_utility_cv_results, "Log Utility")
     
     # MLP classifier with 5-fold CV on discrete labels
     if "mlp" in methods:
