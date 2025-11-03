@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import pathlib
+import os
 import numpy as np
 from typing import Dict, List, Tuple
 from scipy.special import expit
@@ -32,13 +33,51 @@ def load_country_features(jsonl_path: str) -> Dict[str, Dict[str, float]]:
     return country_features
 
 
-def load_decision_file(csv_path: str) -> List[Tuple[float, str, float, str, float]]:
+def create_decision_file(results_dir: str, filepath: str, model_name: str):
+    if not os.path.isdir(results_dir):
+        raise FileNotFoundError(
+            f"'{results_dir}' doesn't exist.\n"
+            f"Expected {results_dir}."
+        )
+    responses = json.load(open(os.path.join(results_dir, f'results_{model_name}.json')))['graph_data']['edges']
+
+    # Open the file in write mode ('w') with newline='' to prevent extra blank rows
+    probs = []
+    with open(filepath, 'w', newline='') as file:
+        writer = csv.writer(file)
+        # Write the header row
+        for k, v in responses.items():
+            countA = v['option_A']['description'].split()[0]
+            countryA = " ".join(v['option_A']['description'].split()[3:-5])
+            countB = v['option_B']['description'].split()[0]
+            countryB = " ".join(v['option_B']['description'].split()[3:-5])
+            aux_data = v['aux_data']
+            if 'is_pseudolabel' in aux_data and aux_data['is_pseudolabel'] == True:
+                continue
+            probA = float(v['probability_A'])
+            if countA == 'You' or countB == 'You':
+                continue
+            countA, countB = int(countA), int(countB)
+            writer.writerow([int(countA), countryA, countB, countryB, probA])
+            probs.append((countA, countB, probA))
+    return filepath
+
+def load_decision_file(model_name: str, csv_path: str | None = None, category: str = "countries", measure: str = "terminal_illness") -> List[Tuple[float, str, float, str, float]]:
     """
     Load decision file (CSV) with country comparisons.
     
     Returns:
         List of tuples: (N_a, country_a, N_b, country_b, probability)
     """
+    results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'exchange_rates', 'results', model_name, category, measure)
+    results_dir = os.path.normpath(results_dir)
+    if csv_path is None:
+        csv_path = os.path.join(results_dir, f'decisions_{model_name}.csv')
+
+    if not os.path.exists(csv_path):
+        print(f"Decision file not found for model: {model_name}. Creating new decision file...")
+        csv_path = create_decision_file(results_dir=results_dir, filepath=csv_path, model_name=model_name)
+
     decisions = []
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
@@ -79,13 +118,15 @@ def create_feature_difference_vector(
 
 
 def preprocess_decision_data(
-    csv_path: str,
-    jsonl_path: str
+    model_name: str,
+    csv_path: str | None = None,
+    jsonl_path: str | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[Dict[str, str]], np.ndarray, np.ndarray]:
     """
     Preprocess decision data from CSV and country features from JSONL.
     
     Args:
+        model_name: Model name
         csv_path: Path to CSV file with country comparisons
         jsonl_path: Path to JSONL file with country features
         
@@ -98,6 +139,14 @@ def preprocess_decision_data(
             - N_a: numpy array with N_a values
             - N_b: numpy array with N_b values
     """
+    # Construct paths relative to utility_analysis directory (parent's parent of this file)
+    if csv_path is None:
+        base_dir = pathlib.Path(__file__).parent.parent.parent
+        csv_path = os.path.join(base_dir, f"{model_name}-country_vs_country.csv")
+    if jsonl_path is None:
+        base_dir = pathlib.Path(__file__).parent.parent.parent
+        jsonl_path = os.path.join(base_dir, f"country_features_{model_name}.jsonl")
+
     # Load country features
     country_features = load_country_features(jsonl_path)
     
@@ -112,7 +161,7 @@ def preprocess_decision_data(
     feature_names = feature_names + ['N_diff', 'N_frac']
     
     # Load decision data
-    decisions = load_decision_file(csv_path)
+    decisions = load_decision_file(model_name=model_name, csv_path=csv_path)
     
     # Build feature matrices and metadata
     X_rows = []
@@ -1163,16 +1212,12 @@ def main():
     methods = ["baseline", "exchange_rates", "log_utility", "mlp", "decision_tree"]
     #methods = ["baseline", "exchange_rates", "log_utility"]
     
-    # Set default file paths if not provided
-    csv_path = args.csv_path or f"{args.model_name}-country_vs_country.csv"
-    jsonl_path = args.jsonl_path or f"country_features_{args.model_name}.jsonl"
-    
     # Prepare MLP hyperparameters
     hidden_layer_sizes = (args.hidden_dim,)
     alpha = args.alpha
     
     # Load and preprocess data
-    X, y, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path)
+    X, y, features, metadata, N_a, N_b = preprocess_decision_data(model_name=args.model_name, csv_path=args.csv_path, jsonl_path=args.jsonl_path)
     
     # Print data summary
     print_data_summary(X, y, features, metadata)

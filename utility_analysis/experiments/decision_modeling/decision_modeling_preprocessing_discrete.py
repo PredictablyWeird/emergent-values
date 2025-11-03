@@ -1,4 +1,5 @@
 import argparse
+import os
 import numpy as np
 import pathlib
 from typing import Dict, List, Tuple
@@ -148,8 +149,9 @@ def evaluate_classifier_with_cv(
 
 
 def preprocess_decision_data(
-    csv_path: str,
-    jsonl_path: str,
+    model_name: str,
+    csv_path: str | None = None,
+    jsonl_path: str | None = None,
     threshold: float = 0.1
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], List[Dict[str, str]], np.ndarray, np.ndarray]:
     """
@@ -157,6 +159,7 @@ def preprocess_decision_data(
     Maps scores to discrete labels using threshold.
     
     Args:
+        model_name: Model name
         csv_path: Path to CSV file with country comparisons
         jsonl_path: Path to JSONL file with country features
         threshold: Threshold parameter t for mapping scores to labels
@@ -171,6 +174,14 @@ def preprocess_decision_data(
             - N_a: numpy array with N_a values
             - N_b: numpy array with N_b values
     """
+    # Construct paths relative to utility_analysis directory (parent's parent of this file)
+    if csv_path is None:
+        base_dir = pathlib.Path(__file__).parent.parent.parent
+        csv_path = os.path.join(base_dir, f"{model_name}-country_vs_country.csv")
+    if jsonl_path is None:
+        base_dir = pathlib.Path(__file__).parent.parent.parent
+        jsonl_path = os.path.join(base_dir, f"country_features_{model_name}.jsonl")
+
     # Load country features
     country_features = load_country_features(jsonl_path)
     
@@ -185,7 +196,7 @@ def preprocess_decision_data(
     feature_names = feature_names + ['N_diff', 'N_frac']
     
     # Load decision data
-    decisions = load_decision_file(csv_path)
+    decisions = load_decision_file(model_name=model_name, csv_path=csv_path)
     
     # Build feature matrices and metadata
     X_rows = []
@@ -1124,17 +1135,17 @@ def main():
     methods = ["baseline", "exchange_rates", "log_utility", "mlp", "decision_tree"]
     #methods = ["baseline", "exchange_rates", "log_utility"]
     
-    # Set default file paths if not provided
-    base_dir = pathlib.Path(__file__).parent.parent.parent
-    csv_path = args.csv_path or base_dir / f"{args.model_name}-country_vs_country.csv"
-    jsonl_path = args.jsonl_path or base_dir / f"country_features_{args.model_name}.jsonl"
-    
     # Prepare MLP hyperparameters
     hidden_layer_sizes = (args.hidden_dim,)
     alpha = args.alpha
     
     # Load and preprocess data (now includes label mapping)
-    X, y, y_labels, features, metadata, N_a, N_b = preprocess_decision_data(csv_path, jsonl_path, args.threshold)
+    X, y, y_labels, features, metadata, N_a, N_b = preprocess_decision_data(
+        model_name=args.model_name, 
+        csv_path=args.csv_path,
+        jsonl_path=args.jsonl_path,
+        threshold=args.threshold
+    )
     
     # Filter out ambiguous samples if requested
     if not args.include_ambiguous:
