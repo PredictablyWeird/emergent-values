@@ -397,7 +397,8 @@ def evaluate_all_methods_discrete(
     min_samples_split: int = 2,
     min_samples_leaf: int = 1,
     log_utility_scale: float = 1.0,
-    log_utility_method: str = "normal"
+    log_utility_method: str = "normal",
+    optimize_hyperparameters: bool = True
 ) -> None:
     """
     Evaluate prediction methods based on the methods list using discrete labels.
@@ -481,11 +482,12 @@ def evaluate_all_methods_discrete(
     
     # Train exchange rate model with cross-validation (fits utility curves from training data)
     if "exchange_rates_cv" in methods:
-        print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method}, optimize_tolerance={optimize_hyperparameters})...")
         exchange_model = ExchangeRatesModel(
             scale=log_utility_scale,
             method=log_utility_method,
-            tolerance=0.28
+            tolerance=0.28,
+            optimize_tolerance=optimize_hyperparameters
         )
         # Use classifier evaluation since we're in discrete mode
         # These models need probabilities (y) for training, but labels (y_labels) for evaluation
@@ -504,10 +506,11 @@ def evaluate_all_methods_discrete(
     
     # Train log utility model with cross-validation (fits utility curves from training data)
     if "log_utility_cv" in methods:
-        print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
+        print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method}, optimize_scale={optimize_hyperparameters})...")
         log_utility_model = LogUtilityModel(
             scale=log_utility_scale,
-            method=log_utility_method
+            method=log_utility_method,
+            optimize_scale=optimize_hyperparameters
         )
         # Use classifier evaluation since we're in discrete mode
         # These models need probabilities (y) for training, but labels (y_labels) for evaluation

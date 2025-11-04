@@ -11,6 +11,10 @@ from .base import BaseModel
 from .exchange_rates import fit_utility_curves_from_data
 from predictors.log_utility import compute_log_utility_predictions
 from data.preprocessing_discrete import map_scores_to_labels
+from .hyperparameter_optimization import (
+    optimize_scale_for_regression,
+    optimize_scale_for_classification
+)
 
 
 class LogUtilityModel(BaseModel):
@@ -19,17 +23,26 @@ class LogUtilityModel(BaseModel):
     def __init__(
         self,
         scale: float = 1.0,
-        method: str = "normal"
+        method: str = "normal",
+        optimize_scale: bool = True
     ):
         """
         Initialize Log Utility model.
         
         Args:
-            scale: Scaling factor for utility curve fitting and prediction
-            method: "normal" (probit) or "sigmoid" (logistic) for utility curve fitting and prediction
+            scale: Scaling factor for predictions (converts utility differences to probabilities).
+                   Not used for fitting utility curves, only for predictions. Used as initial value
+                   if optimize_scale=False, otherwise optimized during fit().
+            method: "normal" (probit) or "sigmoid" (logistic) for converting utility differences to probabilities
+            optimize_scale: If True, optimize scale on training data during fit() (optimizes prediction scale)
+            
+        Note:
+            The scale parameter is used for predictions only (not for fitting utility curves).
+            When optimize_scale=True, the scale is optimized after utility curves are fitted.
         """
         self.scale = scale
         self.method = method
+        self.optimize_scale = optimize_scale
         self.slopes: Dict[str, float] | None = None
         self.intercepts: Dict[str, float] | None = None
     
@@ -60,6 +73,37 @@ class LogUtilityModel(BaseModel):
             metadata_train, N_a_train, N_b_train, y_train,
             scale=self.scale, method=self.method
         )
+        
+        # Optimize scale if requested (scale is used for predictions, not for fitting utility curves)
+        if self.optimize_scale and self.slopes and self.intercepts:
+            # Check if this is classification (y_train contains string labels)
+            is_classification = len(y_train) > 0 and isinstance(y_train[0], (str, np.str_))
+            
+            # Create a prediction function that uses the fitted utility curves
+            def predict_with_scale(metadata, N_a, N_b, scale, method):
+                return compute_log_utility_predictions(
+                    metadata, self.slopes, self.intercepts, N_a, N_b,
+                    scale=scale, method=method
+                )
+            
+            if is_classification:
+                # Get threshold from kwargs if provided
+                threshold = kwargs.get('threshold', 0.1)
+                self.scale = optimize_scale_for_classification(
+                    predict_with_scale,
+                    metadata_train, N_a_train, N_b_train, y_train,
+                    scale_range=(0.1, 2.0),
+                    threshold=threshold,
+                    method=self.method
+                )
+            else:
+                self.scale = optimize_scale_for_regression(
+                    predict_with_scale,
+                    metadata_train, N_a_train, N_b_train, y_train,
+                    scale_range=(0.1, 2.0),
+                    method=self.method
+                )
+        
         return self
     
     def evaluate(

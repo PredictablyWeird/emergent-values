@@ -14,6 +14,10 @@ from .exchange_rates import (
 )
 from predictors.exchange_rates import compute_exchange_rate_predictions
 from data.preprocessing_discrete import map_scores_to_labels
+from .hyperparameter_optimization import (
+    optimize_tolerance_for_regression,
+    optimize_tolerance_for_classification
+)
 
 
 class ExchangeRatesModel(BaseModel):
@@ -23,7 +27,8 @@ class ExchangeRatesModel(BaseModel):
         self,
         scale: float = 1.0,
         method: str = "normal",
-        tolerance: float = 0.28
+        tolerance: float = 0.28,
+        optimize_tolerance: bool = False
     ):
         """
         Initialize Exchange Rates model.
@@ -31,11 +36,13 @@ class ExchangeRatesModel(BaseModel):
         Args:
             scale: Scaling factor for utility curve fitting (kept for API compatibility)
             method: "normal" (probit) or "sigmoid" (logistic) - only "normal" is supported
-            tolerance: Tolerance for exchange rate predictions
+            tolerance: Tolerance for exchange rate predictions (used if optimize_tolerance=False)
+            optimize_tolerance: If True, optimize tolerance on training data during fit()
         """
         self.scale = scale
         self.method = method
         self.tolerance = tolerance
+        self.optimize_tolerance = optimize_tolerance
         self.slopes: Dict[str, float] | None = None
         self.intercepts: Dict[str, float] | None = None
         self.exchange_rates: Dict | None = None
@@ -74,6 +81,32 @@ class ExchangeRatesModel(BaseModel):
             )
         else:
             self.exchange_rates = {}
+        
+        # Optimize tolerance if requested
+        if self.optimize_tolerance and self.exchange_rates:
+            # Check if this is classification (y_train contains string labels)
+            is_classification = len(y_train) > 0 and isinstance(y_train[0], (str, np.str_))
+            
+            N_frac_train = N_b_train / N_a_train
+            N_frac_train = np.where(N_a_train != 0, N_frac_train, 0.0)
+            
+            if is_classification:
+                # Get threshold from kwargs if provided
+                threshold = kwargs.get('threshold', 0.1)
+                self.tolerance = optimize_tolerance_for_classification(
+                    compute_exchange_rate_predictions,
+                    metadata_train, N_frac_train, y_train,
+                    self.exchange_rates,
+                    tolerance_range=(0.1, 0.5),
+                    threshold=threshold
+                )
+            else:
+                self.tolerance = optimize_tolerance_for_regression(
+                    compute_exchange_rate_predictions,
+                    metadata_train, N_frac_train, y_train,
+                    self.exchange_rates,
+                    tolerance_range=(0.1, 0.5)
+                )
         
         return self
     
