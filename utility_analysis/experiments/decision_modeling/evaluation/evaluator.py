@@ -13,17 +13,14 @@ from predictors import (
     evaluate_log_utility_method,
     evaluate_log_utility_method_discrete,
 )
-from models import (
-    train_mlp_with_cv,
-    train_decision_tree_with_cv,
-    train_exchange_rates_with_cv,
-    train_log_utility_with_cv,
-    create_mlp_classifier_pipeline,
-    create_decision_tree_classifier_pipeline,
-)
-from evaluation.classification_cv import evaluate_classifier_with_cv
+from models.mlp_model import MLPModel
+from models.decision_tree_model import DecisionTreeModel
+from models.exchange_rates_model import ExchangeRatesModel
+from models.log_utility_model import LogUtilityModel
+from evaluation.cv_utils import create_cv_splits
+from evaluation.model_evaluator import evaluate_model_with_cv
+from evaluation.classifier_evaluator import evaluate_classifier_with_cv as evaluate_classifier_model_with_cv
 from data.preprocessing_discrete import get_label_distribution
-from sklearn.preprocessing import LabelEncoder
 
 
 def _print_regression_results(results: Dict, method_name: str) -> None:
@@ -89,6 +86,55 @@ def _print_classification_results(results: Dict, method_name: str) -> None:
     print(f"  {results['confusion_matrix']}")
     print(f"\nTrue label distribution: {results['true_label_distribution']}")
     print(f"Predicted label distribution: {results['pred_label_distribution']}")
+    print()
+
+
+def _print_cv_classification_results(results: Dict, method_name: str) -> None:
+    """Helper function to print CV classification results."""
+    print(f"\n{method_name} Cross-validation results ({results['cv_folds']}-fold CV):")
+    
+    # Print hyperparameters if present
+    if 'hidden_layer_sizes' in results:
+        print(f"Hidden layer sizes: {results['hidden_layer_sizes']}")
+    if 'alpha' in results:
+        print(f"Alpha (L2 regularization): {results['alpha']}")
+    if 'max_depth' in results:
+        print(f"Max depth: {results['max_depth']}")
+    if 'min_samples_split' in results:
+        print(f"Min samples split: {results['min_samples_split']}")
+    if 'min_samples_leaf' in results:
+        print(f"Min samples leaf: {results['min_samples_leaf']}")
+    if 'scale' in results:
+        print(f"Scale: {results['scale']}")
+    if 'method' in results:
+        print(f"Method: {results['method']}")
+    if 'tolerance' in results:
+        print(f"Tolerance: {results['tolerance']}")
+    print()
+    
+    print("Test scores:")
+    print(f"  Accuracy: {results['test_accuracy_mean']:.4f} ± {results['test_accuracy_std']:.4f}")
+    print("\nPer-class metrics (mean ± std across folds):")
+    for label in ['A', 'B', 'ambiguous']:
+        print(f"  {label}:")
+        print(f"    Precision: {results['test_precision_mean'][label]:.4f} ± {results['test_precision_std'][label]:.4f}")
+        print(f"    Recall:    {results['test_recall_mean'][label]:.4f} ± {results['test_recall_std'][label]:.4f}")
+        print(f"    F1-score:  {results['test_f1_mean'][label]:.4f} ± {results['test_f1_std'][label]:.4f}")
+    
+    if 'train_accuracy_mean' in results:
+        print("\nTrain scores:")
+        print(f"  Accuracy: {results['train_accuracy_mean']:.4f} ± {results['train_accuracy_std']:.4f}")
+        print("\nPer-class metrics (mean ± std across folds):")
+        for label in ['A', 'B', 'ambiguous']:
+            print(f"  {label}:")
+            print(f"    Precision: {results['train_precision_mean'][label]:.4f} ± {results['train_precision_std'][label]:.4f}")
+            print(f"    Recall:    {results['train_recall_mean'][label]:.4f} ± {results['train_recall_std'][label]:.4f}")
+            print(f"    F1-score:  {results['train_f1_mean'][label]:.4f} ± {results['train_f1_std'][label]:.4f}")
+    
+    print("\nOut-of-fold confusion matrix:")
+    print(f"  {results['confusion_matrix_oof']}")
+    print(f"\nTrue label distribution: {results['true_label_distribution']}")
+    print(f"Predicted label distribution (OOF): {results['pred_label_distribution_oof']}")
     print()
 
 
@@ -197,52 +243,71 @@ def evaluate_all_methods(
             print("Utility curve data not available - skipping log utility evaluation")
             print()
     
+    # Create CV splits once globally (for methods that use CV)
+    cv_folds = 5
+    cv_splits = create_cv_splits(X, y, cv_folds=cv_folds, random_state=random_state)
+    
     # Train exchange rate model with cross-validation (fits utility curves from training data)
     if "exchange_rates_cv" in methods:
         print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
-        exchange_cv_results = train_exchange_rates_with_cv(
-            X, y, metadata, N_a, N_b, N_frac,
-            cv_folds=5,
-            random_state=random_state,
+        exchange_model = ExchangeRatesModel(
             scale=log_utility_scale,
             method=log_utility_method,
             tolerance=0.28
+        )
+        exchange_cv_results = evaluate_model_with_cv(
+            exchange_model,
+            X, y, cv_splits,
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b,
+            N_frac=N_frac
         )
         _print_cv_regression_results(exchange_cv_results, "Exchange Rate")
     
     # Train log utility model with cross-validation (fits utility curves from training data)
     if "log_utility_cv" in methods:
         print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
-        log_utility_cv_results = train_log_utility_with_cv(
-            X, y, metadata, N_a, N_b,
-            cv_folds=5,
-            random_state=random_state,
+        log_utility_model = LogUtilityModel(
             scale=log_utility_scale,
             method=log_utility_method
+        )
+        log_utility_cv_results = evaluate_model_with_cv(
+            log_utility_model,
+            X, y, cv_splits,
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b
         )
         _print_cv_regression_results(log_utility_cv_results, "Log Utility")
     
     # Train MLP with cross-validation
     if "mlp" in methods:
         print(f"Training MLP regressor with cross-validation (L2 regularization, alpha={alpha})...")
-        cv_results = train_mlp_with_cv(
-            X, y, cv_folds=5,
+        mlp_model = MLPModel(
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
             random_state=random_state,
             alpha=alpha
         )
-        _print_cv_regression_results(cv_results, "MLP")
+        mlp_results = evaluate_model_with_cv(
+            mlp_model,
+            X, y, cv_splits
+        )
+        _print_cv_regression_results(mlp_results, "MLP")
     
     # Train Decision Tree with cross-validation
     if "decision_tree" in methods:
         print(f"Training Decision Tree regressor with cross-validation (max_depth={max_depth})...")
-        dt_results = train_decision_tree_with_cv(
-            X, y, cv_folds=5,
+        dt_model = DecisionTreeModel(
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
             random_state=random_state
+        )
+        dt_results = evaluate_model_with_cv(
+            dt_model,
+            X, y, cv_splits
         )
         _print_cv_regression_results(dt_results, "Decision Tree")
 
@@ -408,81 +473,89 @@ def evaluate_all_methods_discrete(
             print("Utility curve data not available - skipping log utility evaluation")
             print()
     
+    # Create CV splits once globally (for methods that use CV)
+    # Use GroupKFold to ensure all rows with the same country stay in the same fold
+    cv_folds = 5
+    groups = np.array([sorted([m["country_x"], m["country_y"]])[0] for m in metadata]) if metadata else None
+    cv_splits = create_cv_splits(X, y_labels, cv_folds=cv_folds, random_state=random_state, groups=groups)
+    
     # Train exchange rate model with cross-validation (fits utility curves from training data)
     if "exchange_rates_cv" in methods:
         print(f"Training exchange rate model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
-        exchange_cv_results = train_exchange_rates_with_cv(
-            X, y, metadata, N_a, N_b, N_frac,
-            cv_folds=5,
-            random_state=random_state,
+        exchange_model = ExchangeRatesModel(
             scale=log_utility_scale,
             method=log_utility_method,
             tolerance=0.28
         )
-        # Note: CV methods return regression metrics, but we can still use them
-        _print_cv_regression_results(exchange_cv_results, "Exchange Rate")
+        # Use classifier evaluation since we're in discrete mode
+        # These models need probabilities (y) for training, but labels (y_labels) for evaluation
+        exchange_cv_results = evaluate_classifier_model_with_cv(
+            exchange_model,
+            X, y_labels, cv_splits,
+            label_order=['A', 'B', 'ambiguous'],
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b,
+            N_frac=N_frac,
+            y_probs=y,  # Pass probabilities for training
+            threshold=threshold
+        )
+        _print_cv_classification_results(exchange_cv_results, "Exchange Rate")
     
     # Train log utility model with cross-validation (fits utility curves from training data)
     if "log_utility_cv" in methods:
         print(f"Training log utility model with cross-validation (scale={log_utility_scale}, method={log_utility_method})...")
-        log_utility_cv_results = train_log_utility_with_cv(
-            X, y, metadata, N_a, N_b,
-            cv_folds=5,
-            random_state=random_state,
+        log_utility_model = LogUtilityModel(
             scale=log_utility_scale,
             method=log_utility_method
         )
-        _print_cv_regression_results(log_utility_cv_results, "Log Utility")
+        # Use classifier evaluation since we're in discrete mode
+        # These models need probabilities (y) for training, but labels (y_labels) for evaluation
+        log_utility_cv_results = evaluate_classifier_model_with_cv(
+            log_utility_model,
+            X, y_labels, cv_splits,
+            label_order=['A', 'B', 'ambiguous'],
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b,
+            y_probs=y,  # Pass probabilities for training
+            threshold=threshold
+        )
+        _print_cv_classification_results(log_utility_cv_results, "Log Utility")
     
     # MLP classifier with 5-fold CV on discrete labels
     if "mlp" in methods:
         print(f"Evaluating MLP classifier with 5-fold CV on discrete labels (alpha={alpha})...")
-        label_encoder = LabelEncoder()
-        label_encoder.fit(y_labels)
-        # Partition by country_x for CV
-        groups = np.array([m["country_x"] for m in metadata])
-        pipeline = create_mlp_classifier_pipeline(
+        mlp_model = MLPModel(
             hidden_layer_sizes=hidden_layer_sizes,
             max_iter=max_iter,
             random_state=random_state,
-            alpha=alpha
+            alpha=alpha,
+            task="classification"
         )
-        evaluate_classifier_with_cv(
-            name="MLP",
-            pipeline=pipeline,
-            X=X,
-            y_labels=y_labels,
-            label_order=['A', 'B', 'ambiguous'],
-            cv_folds=5,
-            random_state=random_state,
-            y_is_encoded=True,
-            label_encoder=label_encoder,
-            groups=groups
+        mlp_results = evaluate_classifier_model_with_cv(
+            mlp_model,
+            X, y_labels, cv_splits,
+            label_order=['A', 'B', 'ambiguous']
         )
+        _print_cv_classification_results(mlp_results, "MLP")
     
     # Decision Tree classifier with 5-fold CV on discrete labels
     if "decision_tree" in methods:
         print(f"Evaluating Decision Tree classifier with 5-fold CV on discrete labels (max_depth={max_depth})...")
-        pipeline = create_decision_tree_classifier_pipeline(
+        dt_model = DecisionTreeModel(
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
-            random_state=random_state
-        )
-        # Partition by country_x for CV
-        groups = np.array([m["country_x"] for m in metadata])
-        evaluate_classifier_with_cv(
-            name="Decision Tree",
-            pipeline=pipeline,
-            X=X,
-            y_labels=y_labels,
-            label_order=['A', 'B', 'ambiguous'],
-            cv_folds=5,
             random_state=random_state,
-            y_is_encoded=False,
-            label_encoder=None,
-            groups=groups
+            task="classification"
         )
+        dt_results = evaluate_classifier_model_with_cv(
+            dt_model,
+            X, y_labels, cv_splits,
+            label_order=['A', 'B', 'ambiguous']
+        )
+        _print_cv_classification_results(dt_results, "Decision Tree")
 
 
 def evaluate_equal_n_subset_discrete(

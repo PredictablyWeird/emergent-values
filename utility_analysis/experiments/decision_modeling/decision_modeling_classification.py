@@ -142,7 +142,7 @@ def main():
     args = parse_args()
     
     # Methods to include in evaluation
-    methods = ["baseline", "exchange_rates", "log_utility", "mlp", "decision_tree"]
+    methods = ["baseline", "exchange_rates_cv", "log_utility_cv", "mlp", "decision_tree"]
     
     # Prepare MLP hyperparameters
     hidden_layer_sizes = (args.hidden_dim,)
@@ -201,7 +201,7 @@ def main():
     )
     
     # Train MLP and analyze learned criteria (only if mlp is in methods)
-    if "mlp" in methods and False:
+    if "mlp" in methods:
         train_and_analyze_mlp_criteria_discrete(
             X, y_labels, features,
             hidden_layer_sizes=hidden_layer_sizes,
@@ -211,7 +211,7 @@ def main():
         )
     
     # Train Decision Tree and analyze learned structure (only if decision_tree is in methods)
-    if "decision_tree" in methods and False:
+    if "decision_tree" in methods:
         train_and_analyze_decision_tree_discrete(
             X, y_labels, features,
             max_depth=args.max_depth,

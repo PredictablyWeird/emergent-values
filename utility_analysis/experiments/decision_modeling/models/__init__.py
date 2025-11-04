@@ -2,27 +2,27 @@
 
 from .mlp import (
     create_mlp_pipeline,
-    train_mlp_with_cv,
     create_mlp_classifier_pipeline,
 )
 from .decision_tree import (
     create_decision_tree_pipeline,
-    train_decision_tree_with_cv,
     create_decision_tree_classifier_pipeline,
 )
-from .exchange_rates import (
-    train_exchange_rates_with_cv,
-    train_log_utility_with_cv,
-)
+from .base import BaseModel
+from .mlp_model import MLPModel
+from .decision_tree_model import DecisionTreeModel
+from .exchange_rates_model import ExchangeRatesModel
+from .log_utility_model import LogUtilityModel
 
 __all__ = [
+    "BaseModel",
+    "MLPModel",
+    "DecisionTreeModel",
+    "ExchangeRatesModel",
+    "LogUtilityModel",
     "create_mlp_pipeline",
-    "train_mlp_with_cv",
     "create_mlp_classifier_pipeline",
     "create_decision_tree_pipeline",
-    "train_decision_tree_with_cv",
     "create_decision_tree_classifier_pipeline",
-    "train_exchange_rates_with_cv",
-    "train_log_utility_with_cv",
 ]
 
