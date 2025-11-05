@@ -1,4 +1,26 @@
 # ------------------------------
+# Reasoning Models
+# ------------------------------
+
+# DeepSeek V3.2 with reasoning disabled
+deepseek-32:
+   model_name: "openrouter/deepseek/deepseek-v3.2-exp"
+   model_type: openrouter
+   extra_body:
+     reasoning:
+       enabled: false
+
+# DeepSeek V3.2 with reasoning enabled
+# (This requires increasing max_tokens to a few hundred)
+deepseek-32-reasoning:
+   model_name: "openrouter/deepseek/deepseek-v3.2-exp"
+   model_type: openrouter
+   extra_body:
+     reasoning:
+       enabled: true
+
+
+# ------------------------------
 # OpenAI
 # ------------------------------
 gpt-35-turbo:

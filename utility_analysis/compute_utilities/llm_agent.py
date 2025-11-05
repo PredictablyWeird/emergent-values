@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from functools import wraps
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional
 import asyncio
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
@@ -961,13 +961,15 @@ class LiteLLMAgent:
         base_timeout: float = 5.0,
         base_delay: float = 1.0,
         max_delay: float = 10.0,
-        use_jitter: bool = True
+        use_jitter: bool = True,
+        extra_body: Optional[Dict] = None
     ):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.concurrency_limit = concurrency_limit
         self.accepts_system_message = accepts_system_message
+        self.extra_body = extra_body
 
         self.max_retries = max_retries
         self.base_timeout = base_timeout
@@ -1012,13 +1014,18 @@ class LiteLLMAgent:
                     #     )
 
                     try:
-                        completion_res = await litellm_acompletion(
-                            model=self.model,
-                            messages=message,
-                            max_tokens=self.max_tokens,
-                            temperature=self.temperature,
-                            timeout=current_timeout
-                        )
+                        completion_kwargs = {
+                            "model": self.model,
+                            "messages": message,
+                            "max_tokens": self.max_tokens,
+                            "temperature": self.temperature,
+                            "timeout": current_timeout
+                        }
+                        # Add extra_body if it exists (for OpenRouter reasoning parameter, etc.)
+                        if self.extra_body:
+                            completion_kwargs["extra_body"] = self.extra_body
+                        
+                        completion_res = await litellm_acompletion(**completion_kwargs)
                     except asyncio.TimeoutError:
                         counts["timeouts"] += 1
 

@@ -109,6 +109,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_type = model_config['model_type']
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
+    extra_body = model_config.get('extra_body', None)  # Read extra_body from model config (for reasoning, etc.)
     
     # Get API key from environment variables
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
@@ -131,6 +132,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             concurrency_limit=concurrency_limit,
             accepts_system_message=accepts_system_message,
             base_timeout=kwargs.get('base_timeout', 5),
+            extra_body=extra_body,
         )
     elif model_type == 'huggingface':
         return HuggingFaceAgent(
