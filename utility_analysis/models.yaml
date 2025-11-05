@@ -3,22 +3,41 @@
 # ------------------------------
 
 # DeepSeek V3.2 with reasoning disabled
-deepseek-32:
-   model_name: "openrouter/deepseek/deepseek-v3.2-exp"
-   model_type: openrouter
-   extra_body:
-     reasoning:
-       enabled: false
+deepseek-3-2:
+  model_name: "openrouter/deepseek/deepseek-v3.2-exp"
+  model_type: openrouter
+  extra_body:
+    reasoning:
+      enabled: false
 
 # DeepSeek V3.2 with reasoning enabled
 # (This requires increasing max_tokens to a few hundred)
-deepseek-32-reasoning:
-   model_name: "openrouter/deepseek/deepseek-v3.2-exp"
-   model_type: openrouter
-   extra_body:
-     reasoning:
-       enabled: true
+deepseek-3-2-reasoning:
+  model_name: "openrouter/deepseek/deepseek-v3.2-exp"
+  model_type: openrouter
+  extra_body:
+    reasoning:
+      enabled: true
 
+claude-sonnet-4-5:
+  model_name: "openrouter/anthropic/claude-sonnet-4.5"
+  model_type: openrouter
+  extra_body:
+    reasoning:
+      enabled: false
+      # Unsure if this has an effect, as setting to true doesn't seem to change anything
+      # (But responses are only 4 tokens long so maybe it doesn't reason by default with this prompt?)
+
+# ------------------------------
+# OpenRouter
+# ------------------------------
+kimi-k2:
+  model_name: "openrouter/moonshotai/kimi-k2-0905"
+  model_type: openrouter
+
+qwen-turbo:
+  model_name: "openrouter/qwen/qwen-turbo"
+  model_type: openrouter
 
 # ------------------------------
 # OpenAI
@@ -357,10 +376,6 @@ qwen25-72b-instruct:
   model_type: vllm
   path: "/data/huggingface/models--Qwen--Qwen2.5-72B-Instruct/snapshots/d3d951150c1e5848237cd6a7ad11df4836aee842"
   gpu_count: 8
-
-qwen-turbo:
-  model_name: "openrouter/qwen/qwen-turbo"
-  model_type: openrouter
 
 # ------------------------------
 # Google Gemma
