@@ -13,6 +13,7 @@ from .mlp_model import MLPModel
 from .decision_tree_model import DecisionTreeModel
 from .exchange_rates_model import ExchangeRatesModel
 from .log_utility_model import LogUtilityModel
+from .thurstonian_model import ThurstonianModel
 
 __all__ = [
     "BaseModel",
@@ -20,6 +21,7 @@ __all__ = [
     "DecisionTreeModel",
     "ExchangeRatesModel",
     "LogUtilityModel",
+    "ThurstonianModel",
     "create_mlp_pipeline",
     "create_mlp_classifier_pipeline",
     "create_decision_tree_pipeline",

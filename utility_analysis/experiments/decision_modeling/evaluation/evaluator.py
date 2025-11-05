@@ -17,6 +17,7 @@ from models.mlp_model import MLPModel
 from models.decision_tree_model import DecisionTreeModel
 from models.exchange_rates_model import ExchangeRatesModel
 from models.log_utility_model import LogUtilityModel
+from models.thurstonian_model import ThurstonianModel
 from evaluation.cv_utils import create_cv_splits
 from evaluation.model_evaluator import evaluate_model_with_cv
 from evaluation.classifier_evaluator import evaluate_classifier_with_cv as evaluate_classifier_model_with_cv
@@ -281,6 +282,19 @@ def evaluate_all_methods(
         )
         _print_cv_regression_results(log_utility_cv_results, "Log Utility")
     
+    # Train Thurstonian model with cross-validation (fits utilities directly from training data)
+    if "thurstonian_cv" in methods:
+        print("Training Thurstonian model with cross-validation...")
+        thurstonian_model = ThurstonianModel()
+        thurstonian_cv_results = evaluate_model_with_cv(
+            thurstonian_model,
+            X, y, cv_splits,
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b
+        )
+        _print_cv_regression_results(thurstonian_cv_results, "Thurstonian")
+    
     # Train MLP with cross-validation
     if "mlp" in methods:
         print(f"Training MLP regressor with cross-validation (L2 regularization, alpha={alpha})...")
@@ -525,6 +539,24 @@ def evaluate_all_methods_discrete(
             threshold=threshold
         )
         _print_cv_classification_results(log_utility_cv_results, "Log Utility")
+    
+    # Train Thurstonian model with cross-validation (fits utilities directly from training data)
+    if "thurstonian_cv" in methods:
+        print("Training Thurstonian model with cross-validation...")
+        thurstonian_model = ThurstonianModel()
+        # Use classifier evaluation since we're in discrete mode
+        # These models need probabilities (y) for training, but labels (y_labels) for evaluation
+        thurstonian_cv_results = evaluate_classifier_model_with_cv(
+            thurstonian_model,
+            X, y_labels, cv_splits,
+            label_order=['A', 'B', 'ambiguous'],
+            metadata=metadata,
+            N_a=N_a,
+            N_b=N_b,
+            y_probs=y,  # Pass probabilities for training
+            threshold=threshold
+        )
+        _print_cv_classification_results(thurstonian_cv_results, "Thurstonian")
     
     # MLP classifier with 5-fold CV on discrete labels
     if "mlp" in methods:

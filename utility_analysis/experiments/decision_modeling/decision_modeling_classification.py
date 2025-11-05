@@ -142,7 +142,8 @@ def main():
     args = parse_args()
     
     # Methods to include in evaluation
-    methods = ["baseline", "exchange_rates_cv", "log_utility_cv", "mlp", "decision_tree"]
+    #methods = ["baseline", "exchange_rates_cv", "log_utility_cv", "mlp", "decision_tree"]
+    methods = ["baseline", "exchange_rates_cv", "log_utility_cv", "thurstonian_cv", "decision_tree"]
     
     # Prepare MLP hyperparameters
     hidden_layer_sizes = (args.hidden_dim,)
