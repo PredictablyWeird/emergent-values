@@ -17,6 +17,10 @@ gpt-5-chat:
   model_name: "gpt-5-chat-latest"
   model_type: openai
 
+gpt-5-mini:
+  model_name: "gpt-5-mini"
+  model_type: openai
+
 
 # ------------------------------
 # Anthropic
@@ -331,6 +335,10 @@ qwen25-72b-instruct:
   model_type: vllm
   path: "/data/huggingface/models--Qwen--Qwen2.5-72B-Instruct/snapshots/d3d951150c1e5848237cd6a7ad11df4836aee842"
   gpu_count: 8
+
+qwen-turbo:
+  model_name: "openrouter/qwen/qwen-turbo"
+  model_type: openrouter
 
 # ------------------------------
 # Google Gemma

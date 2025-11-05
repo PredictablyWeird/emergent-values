@@ -265,6 +265,22 @@ exchange_rates10:
     category: "political_orientations"
     measure: "terminal_illness"
 
+# Not included in original paper
+exchange_rates11:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "ethnicities"
+    measure: "terminal_illness"
+
 
 # ============= Expected Utility Experiments ============= #
 

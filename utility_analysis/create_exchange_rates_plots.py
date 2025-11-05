@@ -960,6 +960,49 @@ def plot_appendix_multi_model_average(
             new_key = orig_x
         remapped_combined[new_key] = ratio_val
 
+    # Calculate appropriate min_ratio and max_ratio from the data
+    finite_ratios = [v for v in remapped_combined.values() if v is not None and not math.isinf(v) and v > 0]
+    if finite_ratios:
+        min_val = min(finite_ratios)
+        max_val = max(finite_ratios)
+        
+        # Round to nice powers of 10, ensuring we have some padding
+        # Strategy: round to powers of 10, but ensure the padding is reasonable (not more than 10x the range)
+        # For values between 5 and 1/4, we want 10 and 1/10 (not 100 and 1/100)
+        
+        min_log10 = math.floor(math.log10(min_val))
+        max_log10 = math.ceil(math.log10(max_val))
+        
+        # Start with one order of magnitude padding on each side
+        candidate_min = 10 ** (min_log10 - 1)
+        candidate_max = 10 ** (max_log10 + 1)
+        
+        # But ensure we don't go more than 10x wider than the actual data range
+        # If padding would make the range more than 10x wider, use tighter padding
+        data_range = max_val / min_val
+        candidate_range = candidate_max / candidate_min
+        
+        if candidate_range > data_range * 10:
+            # Use tighter padding: just round to nearest power of 10, or one order of padding if range is small
+            if max_log10 - min_log10 <= 1:
+                # Small range: use one order of padding
+                effective_min_ratio = 10 ** (min_log10 - 1)
+                effective_max_ratio = 10 ** (max_log10 + 1)
+            else:
+                # Larger range: use tighter padding
+                effective_min_ratio = 10 ** min_log10
+                effective_max_ratio = 10 ** max_log10
+        else:
+            effective_min_ratio = candidate_min
+            effective_max_ratio = candidate_max
+        
+        # But don't override if explicitly set
+        if min_ratio == 1e-2:  # Using default value
+            min_ratio = effective_min_ratio
+        if max_ratio == 1e2:  # Using default value
+            max_ratio = effective_max_ratio
+    # If no finite ratios, use the defaults that were passed in
+
     # Final aggregator bar chart
     fig_agg, ax_agg = plt.subplots(figsize=(12,6))
 
@@ -967,39 +1010,6 @@ def plot_appendix_multi_model_average(
         aggregator_plot_title = f"Average Over Models (category={category}, measure={measure}, pivot={canonical_X})"
     if aggregator_plot_y_label is None:
         aggregator_plot_y_label = f"Exchange Rate Relative to {canonical_X}"
-
-    # Set arrow labels based on value interpretation and exchange rate scale
-    finite_ratios = [v for v in remapped_combined.values() if v is not None and not math.isinf(v) and v > 0]
-    if finite_ratios:
-        avg_ratio = sum(finite_ratios) / len(finite_ratios)
-        scale_inverted = avg_ratio < 1.0  # Most ratios are < 1.0
-        
-        if value_interpretation == 'negative':
-            if scale_inverted:
-                # Negative interpretation + inverted scale = flip the labels
-                arrow_top_label = "More Valued"
-                arrow_bottom_label = "Less Valued"
-            else:
-                # Negative interpretation + normal scale = normal negative labels
-                arrow_top_label = "Less Valued"
-                arrow_bottom_label = "More Valued"
-        else:  # 'positive' or None (default)
-            if scale_inverted:
-                # Positive interpretation + inverted scale = flip the labels
-                arrow_top_label = "Less Valued"
-                arrow_bottom_label = "More Valued"
-            else:
-                # Positive interpretation + normal scale = normal positive labels
-                arrow_top_label = "More Valued"
-                arrow_bottom_label = "Less Valued"
-    else:
-        # Fallback to default behavior
-        if value_interpretation == 'negative':
-            arrow_top_label = "Less Valued"
-            arrow_bottom_label = "More Valued"
-        else:
-            arrow_top_label = "More Valued"
-            arrow_bottom_label = "Less Valued"
 
     plot_single_model_bar_chart(
         ax_agg,
@@ -1017,36 +1027,6 @@ def plot_appendix_multi_model_average(
         bar_color_below=bar_color_below
     )
     ax_agg.set_ylabel(aggregator_plot_y_label, fontsize=18)
-
-    # Optional arrow annotations
-    if arrow_top_label:
-        if arrowprops_top is None:
-            arrowprops_top = dict(arrowstyle="<|-", color="black")
-        ax_agg.annotate(
-            arrow_top_label,
-            xy=arrow_top_xy,
-            xycoords="axes fraction",
-            textcoords="offset points",
-            xytext=(0, 0),
-            rotation=arrow_label_rotation,
-            ha='center', va='center',
-            arrowprops=arrowprops_top,
-            fontsize=14
-        )
-    if arrow_bottom_label:
-        if arrowprops_bottom is None:
-            arrowprops_bottom = dict(arrowstyle="<|-", color="black")
-        ax_agg.annotate(
-            arrow_bottom_label,
-            xy=arrow_bottom_xy,
-            xycoords="axes fraction",
-            textcoords="offset points",
-            xytext=(0, 0),
-            rotation=arrow_label_rotation,
-            ha='center', va='center',
-            arrowprops=arrowprops_bottom,
-            fontsize=14
-        )
 
     plt.tight_layout()
     plt.show()
@@ -1132,22 +1112,6 @@ def plot_appendix_multi_model_average(
             fontsize=10
         )
 
-    # Label the vertical extremes
-    ax_util.text(
-        -0.2, max_ratio,
-        arrow_top_label,
-        rotation=90,
-        va='top', ha='left',
-        fontsize=12
-    )
-    ax_util.text(
-        -0.2, min_ratio,
-        arrow_bottom_label,
-        rotation=90,
-        va='bottom', ha='left',
-        fontsize=12
-    )
-
     plt.tight_layout()
     plt.show()
     figures_dict["aggregator_utility_style_bar_figure"] = fig_util
@@ -1187,6 +1151,20 @@ def main():
             "France", "Italy"
         ]
         aggregator_plot_title = f"Exchange Rates Over Lives From Different Countries ({model})"
+    elif category=='political_orientations':
+        measure = args.measure if args.measure is not None else 'terminal_illness'
+        canonical_X = 'libertarian'
+        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
+
+        include_Xs = X_values['political_orientations']
+        aggregator_plot_title = f"Exchange Rates Over Lives With Different Political Orientations ({model})"
+    elif category=='ethnicities':
+        measure = args.measure if args.measure is not None else 'terminal_illness'
+        canonical_X = 'South Asian'
+        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
+
+        include_Xs = X_values['ethnicities']
+        aggregator_plot_title = f"Exchange Rates Over Lives With Different Ethnicities ({model})"
     else:
         raise NotImplementedError(f"Category {category} not implemented")
 
