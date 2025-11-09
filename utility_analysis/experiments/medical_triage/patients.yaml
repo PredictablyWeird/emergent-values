@@ -247,7 +247,6 @@ patients:
       - "Close neuro/hepatic management"
     reversibility: "Possible improvement if infection control succeeds"
 
-patients:
   - patient_id: A3
     severity: 1
     group: 3
