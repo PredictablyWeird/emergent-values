@@ -475,6 +475,7 @@ async def evaluate_factor_based_prompts(args):
         save_suffix=args.save_suffix,
         with_reasoning=args.with_reasoning,
         system_message=system_prompt,
+        unique_fields=['patient_data'],  # Exclude edges where both options have the same patient_data
     )
     
     # Extract and add JSON responses to results

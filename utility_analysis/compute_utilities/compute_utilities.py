@@ -81,7 +81,7 @@ class PreferenceGraph:
     Handles creation of training/holdout edge sets and sampling strategies.
     """
     
-    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42):
+    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42, unique_fields: Optional[List[str]] = None):
         """
         Initialize a preference graph with training and holdout edge indices.
         
@@ -90,6 +90,10 @@ class PreferenceGraph:
                     {'id': str/int, 'description': str}
             holdout_fraction: Fraction of edges to hold out for evaluation
             seed: Random seed for reproducibility
+            unique_fields: Optional list of field names. If specified, edges will be excluded
+                    where both options have the same values for all specified fields.
+                    For example, if unique_fields=['patient_data'], then edges between
+                    options with the same patient_data will be excluded.
         """
         self.options = options
         self.option_id_to_idx = {option['id']: idx for idx, option in enumerate(options)}
@@ -97,6 +101,36 @@ class PreferenceGraph:
         
         # Generate all possible edge indices as tuples
         all_edge_indices = list(itertools.combinations([opt['id'] for opt in options], 2))
+        
+        # Filter out edges where both options have the same values for unique_fields
+        if unique_fields:
+            original_count = len(all_edge_indices)
+            filtered_edges = []
+            for A_id, B_id in all_edge_indices:
+                option_A = self.options_by_id[A_id]
+                option_B = self.options_by_id[B_id]
+                
+                # Check if all unique_fields are the same in both options
+                should_exclude = True
+                for field in unique_fields:
+                    if field not in option_A or field not in option_B:
+                        # If field is missing in either option, don't exclude
+                        should_exclude = False
+                        break
+                    
+                    # Compare field values (using == for equality, which works for dicts, lists, etc.)
+                    if option_A[field] != option_B[field]:
+                        # Fields differ, so don't exclude this edge
+                        should_exclude = False
+                        break
+                
+                if not should_exclude:
+                    filtered_edges.append((A_id, B_id))
+            
+            all_edge_indices = filtered_edges
+            filtered_count = original_count - len(all_edge_indices)
+            if filtered_count > 0:
+                print(f"Filtered out {filtered_count} edges where both options have the same values for fields: {unique_fields}")
         
         # Split into training and holdout indices
         random.seed(seed)
@@ -358,7 +392,8 @@ async def compute_utilities(
     comparison_prompt_template: Optional[Union[str, Callable]] = None,
     with_reasoning: Optional[bool] = None,
     save_dir: str = "results",
-    save_suffix: Optional[str] = None
+    save_suffix: Optional[str] = None,
+    unique_fields: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Compute utilities for a set of options using a specified utility model.
@@ -376,6 +411,9 @@ async def compute_utilities(
         with_reasoning: Whether to use reasoning-based response parsing. If provided (True/False), overrides the config value
         save_dir: Directory to save results
         save_suffix: Suffix for saved files
+        unique_fields: Optional list of field names. If specified, edges will be excluded where both options
+                have the same values for all specified fields. For example, if unique_fields=['patient_data'],
+                then edges between options with the same patient_data will be excluded.
         
     Returns:
         Dictionary containing results data
@@ -461,10 +499,13 @@ async def compute_utilities(
     
     # Get preference graph arguments from config
     preference_graph_arguments = compute_utilities_config.get('preference_graph_arguments', {})
+    # Use unique_fields from parameter if provided, otherwise from config
+    unique_fields_param = unique_fields if unique_fields is not None else preference_graph_arguments.get('unique_fields', None)
     graph = PreferenceGraph(
         options=options,
         holdout_fraction=preference_graph_arguments.get('holdout_fraction', 0.0),
-        seed=preference_graph_arguments.get('holdout_seed', 42)
+        seed=preference_graph_arguments.get('holdout_seed', 42),
+        unique_fields=unique_fields_param
     )
     
     # Fit the model (this will populate training edges)
