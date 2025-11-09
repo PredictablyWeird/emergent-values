@@ -6,6 +6,7 @@ import random
 import itertools
 import argparse
 import os
+import copy
 from collections import defaultdict
 import pandas as pd
 from sklearn.metrics import log_loss, accuracy_score
@@ -27,7 +28,7 @@ from .templates import comparison_prompt_template_default, comparison_prompt_tem
 from .models import UtilityModel
 import yaml
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 import importlib
 
 from .utility_models import (
@@ -179,13 +180,15 @@ class PreferenceGraph:
             'holdout_edge_indices': [list(edge) for edge in self.holdout_edge_indices]
         }
     
-    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_template: str, include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
+    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_template: Union[str, Callable], include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
         """
         Generate prompts for the given edge indices in both original and flipped ordering.
         
         Args:
             edge_indices: List of (option_A_id, option_B_id) tuples
-            comparison_prompt_template: Template string with {option_A} and {option_B} placeholders
+            comparison_prompt_template: Either:
+                - Template string with {option_A} and {option_B} placeholders, OR
+                - Callable function that takes (option_A_dict, option_B_dict, direction) and returns a prompt string
             include_flipped: Whether to include flipped prompts (Note: This should always be True; we only set it to False for demonstration purposes)
         Returns:
             Tuple containing:
@@ -223,7 +226,13 @@ class PreferenceGraph:
                     option1 = option_B['description']
                     option2 = option_A['description']
                 
-                prompt = comparison_prompt_template.format(option_A=option1, option_B=option2)
+                # Check if comparison_prompt_template is a callable function or a string template
+                if callable(comparison_prompt_template):
+                    # Pass full option dictionaries and direction to the function
+                    prompt = comparison_prompt_template(option_A, option_B, direction)
+                else:
+                    # Use string template formatting
+                    prompt = comparison_prompt_template.format(option_A=option1, option_B=option2)
                 
                 prompt_data = {
                     'prompt_idx': prompt_idx,
@@ -346,7 +355,7 @@ async def compute_utilities(
     compute_utilities_config_path: Optional[str] = None,
     compute_utilities_config_key: Optional[str] = None,
     system_message: Optional[str] = None,
-    comparison_prompt_template: Optional[str] = None,
+    comparison_prompt_template: Optional[Union[str, Callable]] = None,
     with_reasoning: Optional[bool] = None,
     save_dir: str = "results",
     save_suffix: Optional[str] = None
@@ -363,7 +372,7 @@ async def compute_utilities(
         compute_utilities_config_path: Path to compute_utilities.yaml
         compute_utilities_config_key: Key to use in compute_utilities.yaml
         system_message: Optional system message for the agent. If provided, overrides the value in compute_utilities.yaml
-        comparison_prompt_template: Optional template for comparison prompts. If provided, overrides the value in compute_utilities.yaml
+        comparison_prompt_template: Optional template for comparison prompts (string or callable). If provided, overrides the value in compute_utilities.yaml
         with_reasoning: Whether to use reasoning-based response parsing. If provided (True/False), overrides the config value
         save_dir: Directory to save results
         save_suffix: Suffix for saved files
@@ -410,7 +419,14 @@ async def compute_utilities(
     # Process options
     if isinstance(options_list, dict):
         options_list = flatten_hierarchical_options(options_list)
-    options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
+    
+    # Check if options_list is already a list of dictionaries with 'id' and 'description'
+    if options_list and isinstance(options_list[0], dict) and 'id' in options_list[0] and 'description' in options_list[0]:
+        # Options are already structured, use them as-is (preserving any additional fields)
+        options = options_list
+    else:
+        # Options are a list of strings, convert to structured format
+        options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
     
     # Get utility model class
     utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
@@ -467,12 +483,22 @@ async def compute_utilities(
     )
     
     # Prepare results
+    # Create a serializable version of the config (convert callable to string)
+    serializable_config = copy.deepcopy(compute_utilities_config)
+    if 'compute_utilities_arguments' in serializable_config:
+        if 'comparison_prompt_template' in serializable_config['compute_utilities_arguments']:
+            template = serializable_config['compute_utilities_arguments']['comparison_prompt_template']
+            if callable(template):
+                # Replace callable with a string representation
+                func_name = getattr(template, '__name__', 'unknown')
+                serializable_config['compute_utilities_arguments']['comparison_prompt_template'] = f"<callable: {func_name}>"
+    
     results = {
         'options': options,
         'utilities': utilities,
         'metrics': metrics,  # Training metrics
         'holdout_metrics': holdout_metrics,  # Holdout metrics (if computed)
-        'compute_utilities_config': compute_utilities_config,
+        'compute_utilities_config': serializable_config,
         'graph_data': graph.export_data()  # Raw preference graph data
     }
     if create_agent_config_path is not None:
@@ -512,12 +538,28 @@ async def compute_utilities(
                 for k, v in holdout_metrics.items():
                     f.write(f"{k}: {v}\n")
             f.write("\nSorted utilities:\n")
+            # Create a function to format option representation
+            def format_option(opt):
+                """Format option representation, preferring factor fields if available."""
+                # Check for common factor field patterns
+                factor_fields = []
+                for key in opt.keys():
+                    if key not in ['id', 'description'] and not key.startswith('_'):
+                        # Check if it looks like a factor field (not a dict/list)
+                        if not isinstance(opt[key], (dict, list)):
+                            factor_fields.append(f"{key}={opt[key]}")
+                
+                if factor_fields:
+                    return f"({', '.join(factor_fields)})"
+                else:
+                    return opt['description']
+            
             sorted_utils = sorted(
-                [(opt['description'], utilities[opt['id']]) for opt in options],
+                [(format_option(opt), utilities[opt['id']]) for opt in options],
                 key=lambda x: x[1]['mean'],
                 reverse=True
             )
-            for desc, util in sorted_utils:
-                f.write(f"{desc}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+            for opt_repr, util in sorted_utils:
+                f.write(f"{opt_repr}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
                 
     return results
