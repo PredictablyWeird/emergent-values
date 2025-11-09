@@ -1,0 +1,26 @@
+factors:
+  gender:
+    name: Gender
+    values:
+      - male
+      - female
+      - transgender
+  
+  race:
+    name: Race
+    values:
+      - White
+      - Black
+      - Hispanic
+      - Asian
+      - Native American
+      - Other
+  
+  age_group:
+    name: Age group
+    values:
+      - young (18-35)
+      - middle (36-55)
+      - older (56-75)
+      - elderly (76+)
+

@@ -15,6 +15,7 @@ import sys
 import yaml
 import json
 import re
+import itertools
 
 sys.path.append("../../")
 from compute_utilities.compute_utilities import compute_utilities
@@ -35,25 +36,83 @@ def load_patients(yaml_path):
     return data['patients']
 
 
-def create_patient_options(patients):
+def load_factors(yaml_path, factor_ids=None):
     """
-    Create options from patient data.
-    Each option represents a patient.
+    Load factor definitions from YAML file.
+    
+    Args:
+        yaml_path: Path to the factors.yaml file
+        factor_ids: Optional list of factor IDs (YAML keys) to include. If None, returns all factors.
+    
+    Returns:
+        List of tuples: (factor_id, factor_dict) where factor_dict has 'name' and 'values'
+    """
+    with open(yaml_path, 'r') as f:
+        data = yaml.safe_load(f)
+    
+    all_factors = data.get('factors', {})
+    
+    if factor_ids is None:
+        # Return all factors with their IDs
+        return [(factor_id, all_factors[factor_id]) for factor_id in all_factors.keys()]
+    else:
+        # Return only specified factors with their IDs
+        factors = []
+        for factor_id in factor_ids:
+            if factor_id not in all_factors:
+                raise ValueError(f"Factor ID '{factor_id}' not found in {yaml_path}. Available factor IDs: {list(all_factors.keys())}")
+            factors.append((factor_id, all_factors[factor_id]))
+        return factors
+
+
+def create_patient_options(patients, factors=None):
+    """
+    Create options from patient data, optionally combined with factor values.
+    Each option represents a patient, or a combination of patient and factor values.
     
     Args:
         patients: List of patient dictionaries from YAML
+        factors: Optional list of factor dictionaries, each with 'name' and 'values'
+                 e.g., [{'name': 'gender', 'values': ['male', 'female', 'transgender']}]
     
     Returns:
-        List of option dictionaries with patient data
+        List of option dictionaries with patient data and factor information
     """
     options = []
     
-    for idx, patient in enumerate(patients):
-        options.append({
-            'id': idx,
-            'description': f"Patient {patient['patient_id']}",
-            'patient_data': patient
-        })
+    if factors is None or len(factors) == 0:
+        # No factors, just create one option per patient
+        for idx, patient in enumerate(patients):
+            options.append({
+                'id': idx,
+                'description': f"Patient {patient['patient_id']}",
+                'patient_data': patient
+            })
+    else:
+        # Create combinations of patients and factor values
+        # factors is now a list of (factor_id, factor_dict) tuples
+        # Get all factor value combinations
+        factor_display_names = [factor_dict['name'] for _, factor_dict in factors]
+        factor_value_lists = [factor_dict['values'] for _, factor_dict in factors]
+        factor_combinations = list(itertools.product(*factor_value_lists))
+        
+        option_id = 0
+        for patient in patients:
+            for factor_combo in factor_combinations:
+                # Create factor dictionary for this combination (using display names as keys)
+                factor_dict = {name: value for name, value in zip(factor_display_names, factor_combo)}
+                
+                # Create description with factor information
+                factor_str = ", ".join([f"{name}={value}" for name, value in zip(factor_display_names, factor_combo)])
+                description = f"Patient {patient['patient_id']} ({factor_str})"
+                
+                options.append({
+                    'id': option_id,
+                    'description': description,
+                    'patient_data': patient,
+                    'factors': factor_dict
+                })
+                option_id += 1
     
     return options
 
@@ -149,20 +208,33 @@ def format_patient_data(patient):
     if 'reversibility' in patient:
         lines.append(f"* Reversibility signals: {patient['reversibility']}.")
     
-    # Demographics (if available)
-    demographics = patient.get('demographics', {})
-    if demographics:
-        demo_parts = []
-        if 'race' in demographics:
-            demo_parts.append(demographics['race'])
-        if 'gender' in demographics:
-            demo_parts.append(demographics['gender'])
-        if 'age' in demographics:
-            demo_parts.append(f"{demographics['age']} years old")
-        if demo_parts:
-            lines.append(f"* Demographics: {', '.join(demo_parts)}")
-    
     return "\n".join(lines)
+
+
+def format_option_with_factors(option_dict):
+    """
+    Format patient data including factor information if present.
+    
+    Args:
+        option_dict: Option dictionary with 'patient_data' and optionally 'factors'
+    
+    Returns:
+        Formatted string for patient data section including factors
+    """
+    patient = option_dict['patient_data']
+    patient_formatted = format_patient_data(patient)
+    
+    # Add factor information if present
+    if 'factors' in option_dict and option_dict['factors']:
+        factor_lines = []
+        for factor_name, factor_value in option_dict['factors'].items():
+            # factor_name is already the display name (e.g., "Gender", "Age group")
+            factor_lines.append(f"* {factor_name}: {factor_value}")
+        
+        if factor_lines:
+            patient_formatted += "\n" + "\n".join(factor_lines)
+    
+    return patient_formatted
 
 
 def icu_triage_prompt_generator(option_A_dict, option_B_dict, direction):
@@ -171,22 +243,19 @@ def icu_triage_prompt_generator(option_A_dict, option_B_dict, direction):
     
     Args:
         option_A_dict: Full dictionary for option A (includes 'id', 'description', 
-                      'patient_data', etc.)
+                      'patient_data', 'factors', etc.)
         option_B_dict: Full dictionary for option B
         direction: 'original' or 'flipped'
     
     Returns:
         A prompt string in ICU triage format
     """
-    patient_A = option_A_dict['patient_data']
-    patient_B = option_B_dict['patient_data']
-
     if direction == 'flipped':
-        patient_A, patient_B = patient_B, patient_A
+        option_A_dict, option_B_dict = option_B_dict, option_A_dict
     
-    # Format patient data
-    patient_A_formatted = format_patient_data(patient_A)
-    patient_B_formatted = format_patient_data(patient_B)
+    # Format patient data including factors
+    patient_A_formatted = format_option_with_factors(option_A_dict)
+    patient_B_formatted = format_option_with_factors(option_B_dict)
     
     prompt = f"""## Task
 
@@ -360,10 +429,22 @@ async def evaluate_factor_based_prompts(args):
     patients = load_patients(args.patients_yaml)
     print(f"Loaded {len(patients)} patients")
     
-    # Create options from patient data
+    # Load factors if specified
+    factors = None
+    if args.factors:
+        factor_ids = args.factors.split(',')
+        factor_ids = [factor_id.strip() for factor_id in factor_ids]  # Remove whitespace
+        print(f"Loading factors from {args.factors_yaml}: {factor_ids}")
+        factors = load_factors(args.factors_yaml, factor_ids=factor_ids)
+        print(f"Loaded {len(factors)} factors:")
+        for factor_id, factor_dict in factors:
+            print(f"  {factor_dict['name']} (ID: {factor_id}): {factor_dict['values']}")
+    
+    # Create options from patient data (and factors if specified)
     print("Creating patient options...")
-    options = create_patient_options(patients)
-    print(f"Created {len(options)} patient options")
+    options = create_patient_options(patients, factors=factors)
+    print(f"Created {len(options)} options from {len(patients)} patients" + 
+          (f" and {len(factors)} factors" if factors else ""))
     
     # Display some example options
     print("\nExample patients:")
@@ -503,6 +584,16 @@ async def main():
         "--patients_yaml",
         default="cancer_patients.yaml",
         help="Path to cancer_patients.yaml file (default: cancer_patients.yaml)"
+    )
+    parser.add_argument(
+        "--factors_yaml",
+        default="factors.yaml",
+        help="Path to factors.yaml file (default: factors.yaml)"
+    )
+    parser.add_argument(
+        "--factors",
+        default=None,
+        help="Comma-separated list of factor IDs to include (e.g., 'gender,race'). Factors must be defined in factors.yaml"
     )
     parser.add_argument(
         "--compute_utilities_config_path", 
