@@ -582,13 +582,50 @@ async def compute_utilities(
             # Create a function to format option representation
             def format_option(opt):
                 """Format option representation, preferring factor fields if available."""
-                # Check for common factor field patterns
+                # Check if this is a medical triage option with patient_data
+                if 'patient_data' in opt and isinstance(opt['patient_data'], dict):
+                    patient_data = opt['patient_data']
+                    parts = []
+                    
+                    # Add severity and group if available
+                    if 'severity' in patient_data:
+                        parts.append(f"Severity={patient_data['severity']}")
+                    if 'group' in patient_data:
+                        parts.append(f"Group={patient_data['group']}")
+                    
+                    # Add factor fields if available (factors may be stored as a dict under 'factors' key)
+                    factor_fields = []
+                    if 'factors' in opt and isinstance(opt['factors'], dict):
+                        # Factors are stored as a dictionary
+                        for factor_name, factor_value in opt['factors'].items():
+                            factor_fields.append(f"{factor_name}={factor_value}")
+                    else:
+                        # Check for factor fields as top-level keys
+                        for key in opt.keys():
+                            if key not in ['id', 'description', 'patient_data', 'factors'] and not key.startswith('_'):
+                                # Check if it looks like a factor field (not a dict/list)
+                                if not isinstance(opt[key], (dict, list)):
+                                    factor_fields.append(f"{key}={opt[key]}")
+                    
+                    if factor_fields:
+                        parts.extend(factor_fields)
+                    
+                    if parts:
+                        return f"({', '.join(parts)})"
+                
+                # Fallback: check for common factor field patterns
                 factor_fields = []
-                for key in opt.keys():
-                    if key not in ['id', 'description'] and not key.startswith('_'):
-                        # Check if it looks like a factor field (not a dict/list)
-                        if not isinstance(opt[key], (dict, list)):
-                            factor_fields.append(f"{key}={opt[key]}")
+                # Check if factors are stored as a dictionary
+                if 'factors' in opt and isinstance(opt['factors'], dict):
+                    for factor_name, factor_value in opt['factors'].items():
+                        factor_fields.append(f"{factor_name}={factor_value}")
+                else:
+                    # Check for factor fields as top-level keys
+                    for key in opt.keys():
+                        if key not in ['id', 'description', 'factors'] and not key.startswith('_'):
+                            # Check if it looks like a factor field (not a dict/list)
+                            if not isinstance(opt[key], (dict, list)):
+                                factor_fields.append(f"{key}={opt[key]}")
                 
                 if factor_fields:
                     return f"({', '.join(factor_fields)})"
