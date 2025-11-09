@@ -183,7 +183,8 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         pseudolabel_confidence_threshold: float = 0.95,
         seed: Optional[int] = None,
         K: int = 10,
-        include_flipped: bool = True
+        include_flipped: bool = True,
+        max_iterations: Optional[int] = None
     ):
         """
         Initialize the Thurstonian Active Learning utility model.
@@ -205,6 +206,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             seed: Random seed for reproducibility
             K: Number of responses to generate per prompt
             include_flipped: Whether to include flipped prompts (Note: This should always be True; we only set it to False for demonstration purposes)
+            max_iterations: Maximum number of active learning iterations. If None, calculated from edge_multiplier.
         """
         # Call parent class's __init__ with required arguments
         super().__init__(
@@ -227,6 +229,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         self.seed = seed
         self.K = K
         self.include_flipped = include_flipped
+        self.max_iterations = max_iterations
 
     async def fit(
         self,
@@ -257,10 +260,14 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             num_iterations = 0
         else:
             num_iterations = int(np.ceil(remainder / self.num_edges_per_iteration))
+        
+        # Apply max_iterations limit if specified
+        if self.max_iterations is not None:
+            num_iterations = min(num_iterations, self.max_iterations)
             
         print(f"Target total edges: {target_total_edges}")
         print(f"Initial edges: {initial_edges}")
-        print(f"Number of iterations: {num_iterations}")
+        print(f"Number of iterations: {num_iterations}" + (f" (limited by max_iterations={self.max_iterations})" if self.max_iterations is not None and num_iterations == self.max_iterations else ""))
         
         # Generate initial pairs using regular graph
         initial_pairs = graph.sample_regular_graph(degree=self.degree, seed=self.seed)

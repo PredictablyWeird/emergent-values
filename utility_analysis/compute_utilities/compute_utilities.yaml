@@ -111,6 +111,7 @@ minimal_debug:
     K: 1
     use_pseudolabels: false
     pseudolabel_confidence_threshold: 0.95
+    max_iterations: 5
   preference_graph_arguments:
     holdout_fraction: 0.0
     holdout_seed: 42
