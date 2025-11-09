@@ -602,5 +602,25 @@ async def compute_utilities(
             )
             for opt_repr, util in sorted_utils:
                 f.write(f"{opt_repr}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+    
+    # Ensure all async tasks are completed before returning
+    # This prevents the script from hanging due to pending tasks
+    loop = asyncio.get_event_loop()
+    current_task = asyncio.current_task(loop)
+    pending = [task for task in asyncio.all_tasks(loop) if task is not current_task and not task.done()]
+    if pending:
+        # Wait for all pending tasks to complete (with a timeout)
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=1.0)
+        except asyncio.TimeoutError:
+            # If tasks don't complete quickly, cancel them
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            # Wait a bit for cancellation to propagate
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except Exception:
+                pass  # Ignore exceptions from cancelled tasks
                 
     return results
