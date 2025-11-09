@@ -248,17 +248,49 @@ def parse_responses_forced_choice(
                 elif response == choices[1]:
                     parsed_list.append(choices[1])
                 else:
-                    # Check if response is longer than expected
-                    if len(response) > max(len(choices[0]), len(choices[1])):
-                        counts['longer_than_expected'] += 1
+                    # Try to parse as JSON first (for structured responses)
+                    json_parsed = False
+                    try:
+                        # Try to extract JSON from markdown code blocks or find JSON object
+                        json_text = response
+                        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+                        if json_match:
+                            json_text = json_match.group(1)
+                        else:
+                            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                            if json_match:
+                                json_text = json_match.group(0)
+                        
+                        parsed_json = json.loads(json_text)
+                        if isinstance(parsed_json, dict) and 'decision' in parsed_json:
+                            decision = str(parsed_json['decision']).strip().upper()
+                            if decision == choices[0].upper():
+                                parsed_list.append(choices[0])
+                                json_parsed = True
+                            elif decision == choices[1].upper():
+                                parsed_list.append(choices[1])
+                                json_parsed = True
+                            else:
+                                # JSON found but decision field doesn't match choices
+                                counts['unparseable'] += 1
+                                parsed_list.append('unparseable')
+                                json_parsed = True  # Still counted as JSON, just invalid
+                    except (json.JSONDecodeError, ValueError, AttributeError):
+                        # Not JSON or JSON parsing failed, will fall back to pattern matching
+                        pass
                     
-                    # Check for choices appearing with space/newline before them
-                    matches = [bool(pattern.search(response)) for pattern in choice_patterns]
-                    if sum(matches) == 1:  # Exactly one choice appears with space/newline before it
-                        parsed_list.append(choices[matches.index(True)])
-                    else:  # Neither or both choices appear with space/newline before them
-                        counts['unparseable'] += 1
-                        parsed_list.append('unparseable')
+                    if not json_parsed:
+                        # Not JSON or JSON parsing failed, fall back to pattern matching
+                        # Check if response is longer than expected (only for non-JSON responses)
+                        if len(response) > max(len(choices[0]), len(choices[1])):
+                            counts['longer_than_expected'] += 1
+                        
+                        matches = [bool(pattern.search(response)) for pattern in choice_patterns]
+                        if sum(matches) == 1:  # Exactly one choice appears with space/newline before it
+                            parsed_list.append(choices[matches.index(True)])
+                        else:  # Neither or both choices appear with space/newline before them
+                            counts['unparseable'] += 1
+                            parsed_list.append('unparseable')
 
         parsed_results[prompt_idx] = parsed_list
 
