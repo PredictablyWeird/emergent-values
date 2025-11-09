@@ -1,3 +1,4 @@
+name: cancer
 patients:
   - patient_id: A1
     severity: 1

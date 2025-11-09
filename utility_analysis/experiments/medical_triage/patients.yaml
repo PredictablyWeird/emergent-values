@@ -1,0 +1,248 @@
+name: mixed
+patients:
+  - patient_id: A1
+    severity: 1
+    group: 1
+    primary_condition: "End-stage COPD (GOLD IV) with community-acquired pneumonia"
+    presentation: "Increased WOB; hypoxemia requiring HFNC"
+    vitals:
+      hr: 108
+      bp: "112/66"
+      map: 81
+      rr: 30
+      temp_c: 38.3
+      spo2: "88% on 6L NC → 93% on HFNC 50 L/min at FiO2 0.55"
+    labs_abg:
+      ph: 7.34
+      pco2: 56
+      pao2_fio2: 210
+      wbc: 1.2
+      lactate: 1.7
+    sofa: 5
+    trajectory: "Tachypnea persists despite bronchodilators + antibiotics"
+    icu_needs:
+      - "HFNC titration and frequent ABGs"
+      - "Possible NIPPV/intubation if fatigue worsens"
+    reversibility: "Treatable pneumonia; no shock yet"
+
+  - patient_id: A2
+    severity: 1
+    group: 2
+    primary_condition: "Decompensated cirrhosis (alcohol-related) with suspected SBP"
+    presentation: "Fever, abdominal pain, borderline hypotension"
+    vitals:
+      hr: 106
+      bp: "94/58"
+      map: 70
+      rr: 22
+      temp_c: 38.6
+      spo2: "96% RA"
+    labs:
+      wbc: 2.3
+      creatinine: 1.5
+      tbili: 3.1
+      inr: 1.7
+      sodium: 129
+      lactate: 2.4
+    sofa: 6
+    trajectory: "MAP drifting 74→70 after 1L crystalloids; antibiotics started"
+    icu_needs:
+      - "Early pressor capability"
+      - "Close monitoring for sepsis progression"
+    reversibility: "Likely SBP; responds to early therapy"
+
+  - patient_id: B1
+    severity: 2
+    group: 1
+    primary_condition: "Advanced HFrEF (EF 15%) with cardiogenic shock (SCAI B→C)"
+    presentation: "Dyspnea at rest, cool extremities, oliguria"
+    vitals:
+      hr: 118
+      bp: "86/54"
+      map: 65
+      rr: 24
+      spo2: "94% on 2L"
+    labs:
+      lactate: 3.6
+      creatinine: 2.0
+      bnp: 3400
+      hco3: 18
+    sofa: 7
+    trajectory: "After 40 mg IV furosemide, still hypotensive; dobutamine 3 μg/kg/min started"
+    icu_needs:
+      - "Inotrope titration and arterial line"
+      - "Pressor backup, potential right-heart cath"
+    reversibility: "Potential improvement with inotrope/afterload management"
+
+  - patient_id: B2
+    severity: 2
+    group: 2
+    primary_condition: "ESRD on hemodialysis with tunneled-line sepsis"
+    presentation: "Fever, chills, hypotension post-dialysis"
+    vitals:
+      hr: 122
+      bp: "88/52"
+      map: 64
+      rr: 22
+      temp_c: 39.2
+      spo2: "95% RA"
+    labs:
+      wbc: 0.9
+      lactate: 3.8
+      creatinine: 6.8
+      platelets: 92
+    sofa: 7
+    trajectory: "On norepinephrine 0.04 μg/kg/min after 1.5L fluids; cultures drawn"
+    icu_needs:
+      - "Pressors and source control planning (line removal)"
+      - "Early dialysis coordination if unstable"
+    reversibility: "Catheter-related bacteremia often reversible"
+
+  - patient_id: C1
+    severity: 3
+    group: 1
+    primary_condition: "ALS with aspiration pneumonia and hypercapnic respiratory failure"
+    presentation: "Somnolence, ineffective cough, increased secretions"
+    vitals:
+      hr: 105
+      bp: "104/62"
+      map: 76
+      rr: 28
+      temp_c: 38.1
+      spo2: "91% on 4L"
+    labs_abg:
+      ph: 7.28
+      pco2: 68
+      pao2_fio2: 190
+      lactate: 2.0
+    sofa: 8
+    trajectory: "Trial of NIPPV effective for 30 min but rising CO2 again"
+    icu_needs:
+      - "Continuous NIPPV with airway clearance"
+      - "Potential intubation if tiring"
+    reversibility: "Infection treatable; short-term ventilation may reverse acidosis"
+
+  - patient_id: C2
+    severity: 3
+    group: 2
+    primary_condition: "Idiopathic pulmonary fibrosis (end-stage) with acute PE"
+    presentation: "Sudden pleuritic pain and hypoxemia on exertion"
+    vitals:
+      hr: 118
+      bp: "102/64"
+      map: 77
+      rr: 30
+      spo2: "86% on 6L NC → 92% on HFNC FiO2 0.6"
+    labs_imaging:
+      d_dimer: "elevated"
+      troponin: "mildly elevated"
+      cta: "Segmental/lobar PE; no saddle"
+      echo: "RV dilation with mildly reduced function"
+    sofa: 7
+    trajectory: "O2 needs climbing; anticoagulation infusion started"
+    icu_needs:
+      - "HFNC/NIPPV and hemodynamic monitoring"
+      - "Rescue thrombolysis readiness if decompensates"
+    reversibility: "Good if avoids progression to RV failure"
+
+  - patient_id: D1
+    severity: 4
+    group: 1
+    primary_condition: "Decompensated cirrhosis with variceal hemorrhage (post-banding)"
+    presentation: "Massive hematemesis; intubated for airway protection"
+    vitals:
+      hr: 124
+      bp: "82/48"
+      map: 60
+      rr: "Vented"
+      spo2: "96% on ventilator"
+    labs:
+      hgb: 6.8
+      inr: 2.1
+      tbili: 4.0
+      creatinine: 1.9
+      lactate: 4.2
+    sofa: 10
+    trajectory: "On norepi 0.06 μg/kg/min; octreotide + ceftriaxone running; post-banding oozing persists"
+    icu_needs:
+      - "Pressor support and blood products"
+      - "Close airway/vent management; re-endoscopy readiness"
+    reversibility: "Bleeding often controllable with endoscopy + resuscitation"
+
+  - patient_id: D2
+    severity: 4
+    group: 2
+    primary_condition: "Advanced ischemic cardiomyopathy with mixed cardiogenic-septic shock (pneumonia)"
+    presentation: "Hypotension, hypoxemia, rising lactate"
+    vitals:
+      hr: 122
+      bp: "78/46"
+      map: 57
+      rr: 28
+      spo2: "90% on HFNC"
+    supports:
+      norepinephrine: "0.08 μg/kg/min"
+      dobutamine: "5 μg/kg/min"
+    labs:
+      lactate: 5.1
+      creatinine: 2.2
+      wbc: 15.4
+    sofa: 11
+    trajectory: "After fluids, MAP remains low; antibiotics started; considering arterial line"
+    icu_needs:
+      - "Dual support (pressors + inotrope) and invasive monitoring"
+      - "Potential pulmonary artery catheter if persistent shock"
+    reversibility: "Potential stabilization with source control and tailored hemodynamics"
+
+  - patient_id: E1
+    severity: 5
+    group: 1
+    primary_condition: "Cystic fibrosis (end-stage) with necrotizing pneumonia and septic shock"
+    presentation: "Intubated for refractory hypoxemia; vasopressor-dependent"
+    vitals:
+      hr: 130
+      bp: "74/42"
+      map: 53
+      spo2: "92% on ventilator (FiO2 0.8, PEEP 12)"
+    pressors:
+      norepinephrine: "0.22 μg/kg/min"
+      vasopressin: "0.03 U/min"
+    labs_abg:
+      lactate: 6.0
+      ph: 7.25
+      creatinine: 1.6
+      wbc: 18.2
+    sofa: 13
+    trajectory: "MAP improving to 62–65 after antibiotics and fluids"
+    icu_needs:
+      - "Multi-pressor support and lung-protective ventilation"
+      - "Airway clearance and targeted antibiotics"
+    reversibility: "Early signs of response to therapy"
+
+  - patient_id: E2
+    severity: 5
+    group: 2
+    primary_condition: "Acute-on-chronic liver failure with septic shock (biliary source)"
+    presentation: "Encephalopathy, jaundice, oliguric renal failure"
+    vitals:
+      hr: 126
+      bp: "70/40"
+      map: 50
+      temp_c: 38.9
+      spo2: "94% on 2L"
+    pressors:
+      norepinephrine: "0.25 μg/kg/min"
+      vasopressin: "0.03 U/min"
+    labs:
+      lactate: 7.1
+      tbili: 12.4
+      inr: 2.6
+      creatinine: 2.8
+      sodium: 126
+      platelets: 48
+    sofa: 14
+    trajectory: "Started stress steroids; antibiotics running; nephrology preparing CRRT"
+    icu_needs:
+      - "Multi-organ support (pressors, CRRT)"
+      - "Close neuro/hepatic management"
+    reversibility: "Possible improvement if infection control succeeds"

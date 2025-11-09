@@ -26,14 +26,19 @@ def load_patients(yaml_path):
     Load patient data from YAML file.
     
     Args:
-        yaml_path: Path to the cancer_patients.yaml file
+        yaml_path: Path to the patients YAML file
     
     Returns:
-        List of patient dictionaries
+        Tuple of (patient_type_name, list of patient dictionaries)
     """
     with open(yaml_path, 'r') as f:
         data = yaml.safe_load(f)
-    return data['patients']
+    
+    # Get patient type name from YAML (e.g., "cancer" or "non_cancer")
+    patient_type_name = data.get('name', 'unknown')
+    patients = data['patients']
+    
+    return patient_type_name, patients
 
 
 def load_factors(yaml_path, factor_ids=None):
@@ -129,12 +134,15 @@ def format_patient_data(patient):
     """
     lines = []
     
-    # Primary cancer
-    lines.append(f"* Primary cancer: {patient['primary_cancer']}")
-    if 'anc' in patient.get('labs', {}):
-        lines[-1] += f", neutropenic (ANC {patient['labs']['anc']})."
-    else:
-        lines[-1] += "."
+    # Primary condition/cancer - handle both fields
+    if 'primary_cancer' in patient:
+        lines.append(f"* Primary cancer: {patient['primary_cancer']}")
+        if 'anc' in patient.get('labs', {}):
+            lines[-1] += f", neutropenic (ANC {patient['labs']['anc']})."
+        else:
+            lines[-1] += "."
+    elif 'primary_condition' in patient:
+        lines.append(f"* Primary condition: {patient['primary_condition']}.")
     
     # Presentation
     lines.append(f"* Presentation: {patient['presentation']}.")
@@ -181,8 +189,11 @@ def format_patient_data(patient):
         labs_parts.append(f"Tbili {all_labs['tbili']}")
     if 'platelets' in all_labs:
         labs_parts.append(f"Plt {all_labs['platelets']}")
+    # Handle both p_f_ratio and pao2_fio2 field names
     if 'p_f_ratio' in all_labs:
         labs_parts.append(f"PaO₂/FiO₂ ≈ {all_labs['p_f_ratio']}")
+    elif 'pao2_fio2' in all_labs:
+        labs_parts.append(f"PaO₂/FiO₂ ≈ {all_labs['pao2_fio2']}")
     if 'wbc' in all_labs:
         labs_parts.append(f"WBC {all_labs['wbc']}")
     
@@ -421,24 +432,36 @@ async def evaluate_factor_based_prompts(args):
     """
     start_time = time.time()
     
-    # Create save directory if it doesn't exist
-    os.makedirs(args.save_dir, exist_ok=True)
-    
     # Load patient data
     print(f"Loading patient data from {args.patients_yaml}...")
-    patients = load_patients(args.patients_yaml)
-    print(f"Loaded {len(patients)} patients")
+    patient_type_name, patients = load_patients(args.patients_yaml)
+    print(f"Loaded {len(patients)} patients (type: {patient_type_name})")
     
     # Load factors if specified
     factors = None
+    factor_name = None
     if args.factors:
         factor_ids = args.factors.split(',')
         factor_ids = [factor_id.strip() for factor_id in factor_ids]  # Remove whitespace
+        
+        # For now, assume only a single factor is selected
+        if len(factor_ids) > 1:
+            raise ValueError("Currently only a single factor is supported. Please specify only one factor.")
+        
         print(f"Loading factors from {args.factors_yaml}: {factor_ids}")
         factors = load_factors(args.factors_yaml, factor_ids=factor_ids)
         print(f"Loaded {len(factors)} factors:")
         for factor_id, factor_dict in factors:
             print(f"  {factor_dict['name']} (ID: {factor_id}): {factor_dict['values']}")
+            factor_name = factor_dict['name'].lower().replace(' ', '_')  # Use factor name for directory
+    
+    # Create save directory structure: results/patient_type/factor/
+    if factor_name:
+        save_dir = os.path.join(args.save_dir, patient_type_name, factor_name)
+    else:
+        save_dir = os.path.join(args.save_dir, patient_type_name, "no_factors")
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Results will be saved to: {save_dir}")
     
     # Create options from patient data (and factors if specified)
     print("Creating patient options...")
@@ -450,7 +473,9 @@ async def evaluate_factor_based_prompts(args):
     print("\nExample patients:")
     for opt in options[:3]:
         patient = opt['patient_data']
-        print(f"  ID {opt['id']}: {opt['description']} - {patient['primary_cancer']} (SOFA: {patient.get('sofa', 'N/A')})")
+        # Handle both primary_cancer and primary_condition
+        primary = patient.get('primary_cancer') or patient.get('primary_condition', 'Unknown')
+        print(f"  ID {opt['id']}: {opt['description']} - {primary} (SOFA: {patient.get('sofa', 'N/A')})")
     
     # Ensure create_agent_config_key defaults if not set
     if args.create_agent_config_key is None:
@@ -471,7 +496,7 @@ async def evaluate_factor_based_prompts(args):
         compute_utilities_config_path=args.compute_utilities_config_path,
         compute_utilities_config_key=args.compute_utilities_config_key,
         comparison_prompt_template=icu_triage_prompt_generator,  # Pass the function
-        save_dir=args.save_dir,
+        save_dir=save_dir,  # Use the constructed save directory
         save_suffix=args.save_suffix,
         with_reasoning=args.with_reasoning,
         system_message=system_prompt,
@@ -500,7 +525,7 @@ async def evaluate_factor_based_prompts(args):
     
     if json_responses:
         # Update the main results file with JSON responses
-        results_path = os.path.join(args.save_dir, f"results_{save_suffix}.json")
+        results_path = os.path.join(save_dir, f"results_{save_suffix}.json")
         if os.path.exists(results_path):
             with open(results_path, 'r') as f:
                 results_data = json.load(f)
@@ -521,7 +546,7 @@ async def evaluate_factor_based_prompts(args):
         )
         
         # Save example prompt
-        example_prompt_path = os.path.join(args.save_dir, f"example_prompt_{save_suffix}.txt")
+        example_prompt_path = os.path.join(save_dir, f"example_prompt_{save_suffix}.txt")
         with open(example_prompt_path, 'w') as f:
             f.write(example_prompt)
         print(f"\nSaved example prompt to: {example_prompt_path}")
@@ -584,7 +609,7 @@ async def main():
     parser.add_argument(
         "--patients_yaml",
         default="cancer_patients.yaml",
-        help="Path to cancer_patients.yaml file (default: cancer_patients.yaml)"
+        help="Path to patients YAML file (default: cancer_patients.yaml). The YAML should have a 'name' field for the patient type."
     )
     parser.add_argument(
         "--factors_yaml",
