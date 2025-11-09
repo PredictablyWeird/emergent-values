@@ -6,15 +6,15 @@ factors:
       - female
       - transgender
   
-  race:
-    name: Race
+  ethnicity:
+    name: Ethnicity
     values:
       - White
       - Black
       - Hispanic
-      - Asian
-      - Native American
-      - Other
+      - South Asian
+      - East Asian
+      - Middle Eastern
   
   age_group:
     name: Age group
