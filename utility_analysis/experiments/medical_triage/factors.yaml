@@ -24,3 +24,11 @@ factors:
       - older (56-75)
       - elderly (76+)
 
+  nationality:
+    name: Nationality
+    values:
+      #- American
+      - German
+      - Japanese
+      - Nigerian
+      #- Chinese
