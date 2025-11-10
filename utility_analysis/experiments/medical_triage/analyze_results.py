@@ -6,7 +6,7 @@ Analysis script for medical triage experiment results.
 Computes and prints average utilities grouped by:
 - Severity level
 - Group
-- Gender
+- Factor (automatically detected from results, e.g., Gender, Race, etc.)
 """
 
 import json
@@ -31,7 +31,7 @@ def load_results(results_path: str) -> Dict[str, Any]:
 
 def analyze_results(results: Dict[str, Any]) -> None:
     """
-    Analyze results and print average utilities by severity, group, and gender.
+    Analyze results and print average utilities by severity, group, and factor.
     
     Args:
         results: Results dictionary with 'options' and 'utilities'
@@ -39,10 +39,19 @@ def analyze_results(results: Dict[str, Any]) -> None:
     options = results['options']
     utilities = results['utilities']
     
-    # Group utilities by severity, group, and gender
+    # Detect which factor is being used (if any)
+    factor_name = None
+    for option in options:
+        factors = option.get('factors', {})
+        if factors:
+            # Get the first (and should be only) factor key
+            factor_name = list(factors.keys())[0]
+            break
+    
+    # Group utilities by severity, group, and factor
     by_severity = defaultdict(list)
     by_group = defaultdict(list)
-    by_gender = defaultdict(list)
+    by_factor = defaultdict(list)
     
     for option in options:
         option_id = option['id']
@@ -65,10 +74,10 @@ def analyze_results(results: Dict[str, Any]) -> None:
         if group is not None:
             by_group[group].append(utility_mean)
         
-        # Get gender from factors
-        gender = factors.get('Gender')
-        if gender is not None:
-            by_gender[gender].append(utility_mean)
+        # Get factor value if factor is present
+        if factor_name and factor_name in factors:
+            factor_value = factors[factor_name]
+            by_factor[factor_value].append(utility_mean)
     
     # Calculate and print averages
     print("=" * 60)
@@ -87,20 +96,21 @@ def analyze_results(results: Dict[str, Any]) -> None:
         avg = sum(utils) / len(utils) if utils else 0.0
         print(f"Group {group}: {avg:.4f} (n={len(utils)})")
     
-    print("\n" + "=" * 60)
-    print("Average Utilities by Gender")
-    print("=" * 60)
-    for gender in sorted(by_gender.keys()):
-        utils = by_gender[gender]
-        avg = sum(utils) / len(utils) if utils else 0.0
-        print(f"{gender}: {avg:.4f} (n={len(utils)})")
+    if factor_name and by_factor:
+        print("\n" + "=" * 60)
+        print(f"Average Utilities by {factor_name}")
+        print("=" * 60)
+        for factor_value in sorted(by_factor.keys()):
+            utils = by_factor[factor_value]
+            avg = sum(utils) / len(utils) if utils else 0.0
+            print(f"{factor_value}: {avg:.4f} (n={len(utils)})")
     
     print()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze medical triage experiment results and print average utilities by severity, group, and gender."
+        description="Analyze medical triage experiment results and print average utilities by severity, group, and factor (automatically detected)."
     )
     parser.add_argument(
         "results_file",
