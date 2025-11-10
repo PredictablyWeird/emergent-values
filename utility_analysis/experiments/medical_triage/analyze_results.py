@@ -131,11 +131,7 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
             avg = sum(utils) / len(utils) if utils else 0.0
             print(f"{factor_value}: {avg:.4f} (n={len(utils)})")
     
-    # Analysis: Group differences relative to Group 1 by severity
-    print("\n" + "=" * 60)
-    print("Group Differences Relative to Group 1 (by Severity)")
-    print("=" * 60)
-    
+    # Analysis: Group differences relative to reference group by severity
     # Group utilities by severity and group
     by_severity_group = defaultdict(lambda: defaultdict(list))
     for option in options:
@@ -151,35 +147,53 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
         if severity is not None and group is not None:
             by_severity_group[severity][group].append(utility_mean)
     
-    # Compute differences for each group relative to Group 1, by severity
-    group_differences = defaultdict(list)  # group -> list of differences
+    # Determine reference group (prefer Group 1, otherwise use first available group)
+    all_groups = set()
+    for severity in by_severity_group.keys():
+        all_groups.update(by_severity_group[severity].keys())
     
-    for severity in sorted(by_severity_group.keys()):
-        groups_data = by_severity_group[severity]
-        if 1 not in groups_data:
-            continue  # Skip if group 1 doesn't exist for this severity
-        
-        group1_utils = groups_data[1]
-        
-        for group in sorted(groups_data.keys()):
-            if group == 1:
-                continue  # Skip group 1 itself
-            
-            group_utils = groups_data[group]
-            
-            # Compute differences for each pair within this severity level
-            for g1_util in group1_utils:
-                for g_util in group_utils:
-                    diff = g_util - g1_util
-                    group_differences[group].append(diff)
-    
-    if group_differences:
-        for group in sorted(group_differences.keys()):
-            diffs = group_differences[group]
-            mean_diff, ci_lower, ci_upper = compute_ci(diffs, confidence=0.90)
-            print(f"Group {group} vs Group 1: {mean_diff:.4f} (90% CI: [{ci_lower:.4f}, {ci_upper:.4f}], n={len(diffs)})")
+    if not all_groups:
+        print("\n" + "=" * 60)
+        print("Group Differences (by Severity)")
+        print("=" * 60)
+        print("No groups found in data")
     else:
-        print("No group differences to compute (Group 1 not found or no other groups)")
+        reference_group = 1 if 1 in all_groups else min(all_groups)
+        reference_group_name = f"Group {reference_group}"
+        
+        print("\n" + "=" * 60)
+        print(f"Group Differences Relative to {reference_group_name} (by Severity)")
+        print("=" * 60)
+        
+        # Compute differences for each group relative to reference group, by severity
+        group_differences = defaultdict(list)  # group -> list of differences
+        
+        for severity in sorted(by_severity_group.keys()):
+            groups_data = by_severity_group[severity]
+            if reference_group not in groups_data:
+                continue  # Skip if reference group doesn't exist for this severity
+            
+            ref_group_utils = groups_data[reference_group]
+            
+            for group in sorted(groups_data.keys()):
+                if group == reference_group:
+                    continue  # Skip reference group itself
+                
+                group_utils = groups_data[group]
+                
+                # Compute differences for each pair within this severity level
+                for ref_util in ref_group_utils:
+                    for g_util in group_utils:
+                        diff = g_util - ref_util
+                        group_differences[group].append(diff)
+        
+        if group_differences:
+            for group in sorted(group_differences.keys()):
+                diffs = group_differences[group]
+                mean_diff, ci_lower, ci_upper = compute_ci(diffs, confidence=0.90)
+                print(f"Group {group} vs {reference_group_name}: {mean_diff:.4f} (90% CI: [{ci_lower:.4f}, {ci_upper:.4f}], n={len(diffs)})")
+        else:
+            print(f"No group differences to compute ({reference_group_name} not found or no other groups)")
     
     # Analysis: Factor differences relative to canonical factor value (if specified)
     if canonical_factor_value and factor_name and by_factor:
