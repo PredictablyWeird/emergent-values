@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import pdb
 import time
 import yaml
 import numpy as np
@@ -114,13 +115,14 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     # Get API key from environment variables
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
         api_key_map = {
-            'openai': 'OPENAI_API_KEY',
+            'openai': 'OPENAI_API_KEY:',
             'anthropic': 'ANTHROPIC_API_KEY',
             'gdm': 'GEMINI_API_KEY',
             'xai': 'XAI_API_KEY',
             'togetherai': 'TOGETHER_AI_API_KEY',
             'openrouter': 'OPENROUTER_API_KEY'
         }
+        pdb.set_trace()
         env_var_name = api_key_map[model_type]
         api_key = os.getenv(env_var_name)
         if api_key is None:

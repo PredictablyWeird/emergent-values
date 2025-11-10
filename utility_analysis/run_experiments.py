@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 from typing import Dict, Optional, List, NamedTuple
+from dotenv import load_dotenv
+
 
 # Configuration constants
 CONDA_ENV_NAME = "pytorch_latest"  # Change this to modify the conda environment used for all jobs
@@ -343,4 +345,5 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    load_dotenv()
     main()
