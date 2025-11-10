@@ -16,6 +16,7 @@ import yaml
 import json
 import re
 import itertools
+import random
 
 sys.path.append("../../")
 from compute_utilities.compute_utilities import compute_utilities
@@ -538,10 +539,11 @@ async def evaluate_factor_based_prompts(args):
     
     # Save an example prompt to a separate file
     if len(options) >= 2:
-        # Generate example prompt using first two patients
+        # Generate example prompt using two random patients
+        idx_a, idx_b = random.sample(range(len(options)), 2)
         example_prompt = icu_triage_prompt_generator(
-            options[0], 
-            options[1], 
+            options[idx_a],
+            options[idx_b],
             'original'
         )
         

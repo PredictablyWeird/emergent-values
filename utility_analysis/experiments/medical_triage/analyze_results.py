@@ -131,9 +131,9 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
             avg = sum(utils) / len(utils) if utils else 0.0
             print(f"{factor_value}: {avg:.4f} (n={len(utils)})")
     
-    # Analysis: Group differences relative to reference group by severity
-    # Group utilities by severity and group
-    by_severity_group = defaultdict(lambda: defaultdict(list))
+    # Analysis: Group differences relative to reference group by severity and factor
+    # Group utilities by severity, factor, and group
+    by_severity_factor_group = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for option in options:
         option_id_str = str(option['id'])
         if option_id_str not in utilities:
@@ -141,20 +141,28 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
         
         utility_mean = utilities[option_id_str]['mean']
         patient_data = option.get('patient_data', {})
+        factors = option.get('factors', {})
         severity = patient_data.get('severity')
         group = patient_data.get('group')
         
+        # Get factor value (if factor exists)
+        factor_value = None
+        if factor_name and factor_name in factors:
+            factor_value = factors[factor_name]
+        
         if severity is not None and group is not None:
-            by_severity_group[severity][group].append(utility_mean)
+            # Use factor_value as key, or None if no factor
+            by_severity_factor_group[severity][factor_value][group].append(utility_mean)
     
     # Determine reference group (prefer Group 1, otherwise use first available group)
     all_groups = set()
-    for severity in by_severity_group.keys():
-        all_groups.update(by_severity_group[severity].keys())
+    for severity in by_severity_factor_group.keys():
+        for factor_val in by_severity_factor_group[severity].keys():
+            all_groups.update(by_severity_factor_group[severity][factor_val].keys())
     
     if not all_groups:
         print("\n" + "=" * 60)
-        print("Group Differences (by Severity)")
+        print("Group Differences (by Severity and Factor)")
         print("=" * 60)
         print("No groups found in data")
     else:
@@ -162,30 +170,31 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
         reference_group_name = f"Group {reference_group}"
         
         print("\n" + "=" * 60)
-        print(f"Group Differences Relative to {reference_group_name} (by Severity)")
+        print(f"Group Differences Relative to {reference_group_name} (by Severity and Factor)")
         print("=" * 60)
         
-        # Compute differences for each group relative to reference group, by severity
+        # Compute differences for each group relative to reference group, by severity and factor
         group_differences = defaultdict(list)  # group -> list of differences
         
-        for severity in sorted(by_severity_group.keys()):
-            groups_data = by_severity_group[severity]
-            if reference_group not in groups_data:
-                continue  # Skip if reference group doesn't exist for this severity
-            
-            ref_group_utils = groups_data[reference_group]
-            
-            for group in sorted(groups_data.keys()):
-                if group == reference_group:
-                    continue  # Skip reference group itself
+        for severity in sorted(by_severity_factor_group.keys()):
+            for factor_val in sorted(by_severity_factor_group[severity].keys(), key=lambda x: (x is None, x)):
+                groups_data = by_severity_factor_group[severity][factor_val]
+                if reference_group not in groups_data:
+                    continue  # Skip if reference group doesn't exist for this severity/factor combo
                 
-                group_utils = groups_data[group]
+                ref_group_utils = groups_data[reference_group]
                 
-                # Compute differences for each pair within this severity level
-                for ref_util in ref_group_utils:
-                    for g_util in group_utils:
-                        diff = g_util - ref_util
-                        group_differences[group].append(diff)
+                for group in sorted(groups_data.keys()):
+                    if group == reference_group:
+                        continue  # Skip reference group itself
+                    
+                    group_utils = groups_data[group]
+                    
+                    # Compute differences for each pair within this severity level and factor value
+                    for ref_util in ref_group_utils:
+                        for g_util in group_utils:
+                            diff = g_util - ref_util
+                            group_differences[group].append(diff)
         
         if group_differences:
             for group in sorted(group_differences.keys()):
@@ -202,11 +211,11 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
             print(f"Available factor values: {sorted(by_factor.keys())}")
         else:
             print("\n" + "=" * 60)
-            print(f"Factor Differences Relative to {canonical_factor_value} (by Severity)")
+            print(f"Factor Differences Relative to {canonical_factor_value} (by Severity and Group)")
             print("=" * 60)
             
-            # Group utilities by severity and factor value
-            by_severity_factor = defaultdict(lambda: defaultdict(list))
+            # Group utilities by severity, group, and factor value
+            by_severity_group_factor = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
             for option in options:
                 option_id_str = str(option['id'])
                 if option_id_str not in utilities:
@@ -216,32 +225,34 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
                 patient_data = option.get('patient_data', {})
                 factors = option.get('factors', {})
                 severity = patient_data.get('severity')
+                group = patient_data.get('group')
                 factor_value = factors.get(factor_name) if factor_name else None
                 
-                if severity is not None and factor_value is not None:
-                    by_severity_factor[severity][factor_value].append(utility_mean)
+                if severity is not None and group is not None and factor_value is not None:
+                    by_severity_group_factor[severity][group][factor_value].append(utility_mean)
             
-            # Compute differences for each factor value relative to canonical value, by severity
+            # Compute differences for each factor value relative to canonical value, by severity and group
             factor_differences = defaultdict(list)  # factor_value -> list of differences
             
-            for severity in sorted(by_severity_factor.keys()):
-                factors_data = by_severity_factor[severity]
-                if canonical_factor_value not in factors_data:
-                    continue  # Skip if canonical factor value doesn't exist for this severity
-                
-                canonical_utils = factors_data[canonical_factor_value]
-                
-                for factor_value in sorted(factors_data.keys()):
-                    if factor_value == canonical_factor_value:
-                        continue  # Skip canonical factor value itself
+            for severity in sorted(by_severity_group_factor.keys()):
+                for group in sorted(by_severity_group_factor[severity].keys()):
+                    factors_data = by_severity_group_factor[severity][group]
+                    if canonical_factor_value not in factors_data:
+                        continue  # Skip if canonical factor value doesn't exist for this severity/group combo
                     
-                    factor_utils = factors_data[factor_value]
+                    canonical_utils = factors_data[canonical_factor_value]
                     
-                    # Compute differences for each pair within this severity level
-                    for canon_util in canonical_utils:
-                        for fact_util in factor_utils:
-                            diff = fact_util - canon_util
-                            factor_differences[factor_value].append(diff)
+                    for factor_value in sorted(factors_data.keys()):
+                        if factor_value == canonical_factor_value:
+                            continue  # Skip canonical factor value itself
+                        
+                        factor_utils = factors_data[factor_value]
+                        
+                        # Compute differences for each pair within this severity level and group
+                        for canon_util in canonical_utils:
+                            for fact_util in factor_utils:
+                                diff = fact_util - canon_util
+                                factor_differences[factor_value].append(diff)
             
             if factor_differences:
                 for factor_value in sorted(factor_differences.keys()):
