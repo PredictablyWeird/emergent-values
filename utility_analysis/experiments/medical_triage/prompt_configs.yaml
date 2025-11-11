@@ -1,13 +1,32 @@
 prompt_configs:
-  gender_death_decision_original:
-    factor: gender
-    measure: deaths
-    setup: decision
-    N_values: original
   
-  gender_terminal_illness:
+  gender_illness_all_original:
     factor: gender
     measure: terminal_illness
+    setup: original
+    N_values: original
+    option_phrasing: original
+
+  gender_illness_decision:
+    factor: gender
+    measure: terminal_illness
+    setup: decision
+    N_values: original
+    option_phrasing: original
+
+  gender_illness_smalln:
+    factor: gender
+    measure: terminal_illness
+    setup: original
+    N_values: small
+    option_phrasing: original
+  
+  gender_illness_direct:
+    factor: gender
+    measure: terminal_illness
+    setup: original
+    N_values: original
+    option_phrasing: direct
   
   ethnicity_deaths:
     factor: ethnicity
