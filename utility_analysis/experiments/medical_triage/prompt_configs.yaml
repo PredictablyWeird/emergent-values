@@ -1,0 +1,33 @@
+prompt_configs:
+  gender_deaths:
+    factor: gender
+    measure: deaths
+  
+  gender_terminal_illness:
+    factor: gender
+    measure: terminal_illness
+  
+  ethnicity_deaths:
+    factor: ethnicity
+    measure: deaths
+  
+  ethnicity_terminal_illness:
+    factor: ethnicity
+    measure: terminal_illness
+  
+  age_group_deaths:
+    factor: age_group
+    measure: deaths
+  
+  age_group_terminal_illness:
+    factor: age_group
+    measure: terminal_illness
+  
+  nationality_deaths:
+    factor: nationality
+    measure: deaths
+  
+  nationality_terminal_illness:
+    factor: nationality
+    measure: terminal_illness
+
