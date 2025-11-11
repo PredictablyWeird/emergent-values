@@ -61,6 +61,7 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
     
     Args:
         results: Results dictionary with 'options' and 'utilities'
+        canonical_factor_value: Optional reference factor value for comparison
     """
     options = results['options']
     utilities = results['utilities']
@@ -174,27 +175,25 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
         print("=" * 60)
         
         # Compute differences for each group relative to reference group, by severity and factor
-        group_differences = defaultdict(list)  # group -> list of differences
+        group_differences = defaultdict(list)
         
         for severity in sorted(by_severity_factor_group.keys()):
             for factor_val in sorted(by_severity_factor_group[severity].keys(), key=lambda x: (x is None, x)):
                 groups_data = by_severity_factor_group[severity][factor_val]
                 if reference_group not in groups_data:
-                    continue  # Skip if reference group doesn't exist for this severity/factor combo
+                    continue
                 
                 ref_group_utils = groups_data[reference_group]
                 
                 for group in sorted(groups_data.keys()):
                     if group == reference_group:
-                        continue  # Skip reference group itself
+                        continue
                     
                     group_utils = groups_data[group]
                     
-                    # Compute differences for each pair within this severity level and factor value
                     for ref_util in ref_group_utils:
                         for g_util in group_utils:
-                            diff = g_util - ref_util
-                            group_differences[group].append(diff)
+                            group_differences[group].append(g_util - ref_util)
         
         if group_differences:
             for group in sorted(group_differences.keys()):
@@ -231,28 +230,26 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
                 if severity is not None and group is not None and factor_value is not None:
                     by_severity_group_factor[severity][group][factor_value].append(utility_mean)
             
-            # Compute differences for each factor value relative to canonical value, by severity and group
-            factor_differences = defaultdict(list)  # factor_value -> list of differences
+            # Compute differences for each factor value relative to canonical value
+            factor_differences = defaultdict(list)
             
             for severity in sorted(by_severity_group_factor.keys()):
                 for group in sorted(by_severity_group_factor[severity].keys()):
                     factors_data = by_severity_group_factor[severity][group]
                     if canonical_factor_value not in factors_data:
-                        continue  # Skip if canonical factor value doesn't exist for this severity/group combo
+                        continue
                     
                     canonical_utils = factors_data[canonical_factor_value]
                     
                     for factor_value in sorted(factors_data.keys()):
                         if factor_value == canonical_factor_value:
-                            continue  # Skip canonical factor value itself
+                            continue
                         
                         factor_utils = factors_data[factor_value]
                         
-                        # Compute differences for each pair within this severity level and group
                         for canon_util in canonical_utils:
                             for fact_util in factor_utils:
-                                diff = fact_util - canon_util
-                                factor_differences[factor_value].append(diff)
+                                factor_differences[factor_value].append(fact_util - canon_util)
             
             if factor_differences:
                 for factor_value in sorted(factor_differences.keys()):
@@ -261,6 +258,104 @@ def analyze_results(results: Dict[str, Any], canonical_factor_value: Optional[st
                     print(f"{factor_value} vs {canonical_factor_value}: {mean_diff:.4f} (90% CI: [{ci_lower:.4f}, {ci_upper:.4f}], n={len(diffs)})")
             else:
                 print(f"No factor differences to compute (canonical value '{canonical_factor_value}' not found or no other values)")
+    
+    print()
+
+
+def analyze_stated_preferences_results(results: Dict[str, Any]) -> None:
+    """
+    Analyze stated preferences results and print average utilities by factor value and N.
+    
+    This function works with the stated preferences format where options have:
+    - 'X': factor value (e.g., 'male', 'female')
+    - 'N': number of patients
+    - 'factor': factor name (e.g., 'gender')
+    
+    Args:
+        results: Results dictionary with 'options' and 'utilities'
+    """
+    options = results['options']
+    utilities = results['utilities']
+    
+    # Group utilities by factor value and by N
+    by_factor_value = defaultdict(list)
+    by_N = defaultdict(list)
+    by_N_and_factor = defaultdict(lambda: defaultdict(list))
+    
+    for option in options:
+        option_id = option['id']
+        option_id_str = str(option_id)
+        if option_id_str not in utilities:
+            continue
+        
+        utility_mean = utilities[option_id_str]['mean']
+        factor_value = option.get('X')  # Factor value (e.g., 'male', 'female')
+        N = option.get('N')  # Number of patients
+        
+        if factor_value is not None:
+            by_factor_value[factor_value].append(utility_mean)
+        
+        if N is not None:
+            by_N[N].append(utility_mean)
+        
+        if N is not None and factor_value is not None:
+            by_N_and_factor[N][factor_value].append(utility_mean)
+    
+    # Calculate and print averages
+    if by_factor_value:
+        print("=" * 60)
+        factor_name = options[0].get('factor', 'Factor') if options else 'Factor'
+        print(f"Average Utilities by {factor_name}")
+        print("=" * 60)
+        for factor_value in sorted(by_factor_value.keys()):
+            utils = by_factor_value[factor_value]
+            avg = sum(utils) / len(utils) if utils else 0.0
+            print(f"{factor_value}: {avg:.4f} (n={len(utils)})")
+    
+    if by_N:
+        print("\n" + "=" * 60)
+        print("Average Utilities by Number of Patients (N)")
+        print("=" * 60)
+        for N in sorted(by_N.keys()):
+            utils = by_N[N]
+            avg = sum(utils) / len(utils) if utils else 0.0
+            print(f"N={N}: {avg:.4f} (n={len(utils)})")
+    
+    # Analysis: Factor value differences with confidence intervals
+    if len(by_factor_value) > 1:
+        print("\n" + "=" * 60)
+        reference_value = sorted(by_factor_value.keys())[0]
+        factor_name = options[0].get('factor', 'Factor') if options else 'Factor'
+        print(f"Factor Differences Relative to {reference_value} (by N)")
+        print("=" * 60)
+        
+        # Compute differences controlling for N
+        factor_differences = defaultdict(list)
+        
+        for N in sorted(by_N_and_factor.keys()):
+            factor_data = by_N_and_factor[N]
+            if reference_value not in factor_data:
+                continue
+            
+            ref_utils = factor_data[reference_value]
+            
+            for factor_value in sorted(factor_data.keys()):
+                if factor_value == reference_value:
+                    continue
+                
+                fv_utils = factor_data[factor_value]
+                
+                for ref_util in ref_utils:
+                    for fv_util in fv_utils:
+                        factor_differences[factor_value].append(fv_util - ref_util)
+        
+        if factor_differences:
+            for factor_value in sorted(factor_differences.keys()):
+                diffs = factor_differences[factor_value]
+                mean_diff, ci_lower, ci_upper = compute_ci(diffs, confidence=0.90)
+                print(f"{factor_value} vs {reference_value}: {mean_diff:.4f} (90% CI: [{ci_lower:.4f}, {ci_upper:.4f}], n={len(diffs)})")
+        else:
+            print(f"No factor differences to compute ({reference_value} not found or no other values)")
     
     print()
 

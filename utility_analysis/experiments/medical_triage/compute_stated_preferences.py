@@ -6,12 +6,15 @@ import os
 import time
 import argparse
 import sys
-from typing import Literal, Dict, Any
+from typing import Dict, Any
+from io import StringIO
 import yaml
 sys.path.append("../../")
 from compute_utilities.compute_utilities import compute_utilities
+from compute_utilities.utils import load_config
 
 from run_triage_experiment import SYSTEM_PROMPT as TRIAGE_SYSTEM_PROMPT
+from analyze_results import load_results, analyze_stated_preferences_results
 
 
 N_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -79,7 +82,12 @@ def create_prompt(prompt_config: Dict[str, Any]) -> str:
         Prompt template string with {option_A} and {option_B} placeholders
     """
     # Get setup text from config, or use default
-    setup = prompt_config.get('setup', SETUPS['original'])
+    # If setup is a key in SETUPS, use that value; otherwise use it as a direct string
+    setup_key = prompt_config.get('setup', 'original')
+    if setup_key in SETUPS:
+        setup = SETUPS[setup_key]
+    else:
+        setup = setup_key  # Use as direct string if not a key
     
     # Format the template with the setup text, keeping {option_A} and {option_B} as placeholders
     return PROMPT_TEMPLATE_BASE.format(setup=setup, option_A="{option_A}", option_B="{option_B}")
@@ -188,6 +196,69 @@ async def optimize_utility_model(args):
         system_message=system_message,
         comparison_prompt_template=prompt_template,
     )
+
+    # Determine save suffix for finding results file
+    if args.save_suffix is None:
+        compute_utilities_config = load_config(
+            args.compute_utilities_config_path,
+            config_key,
+            "compute_utilities.yaml"
+        )
+        utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
+        save_suffix = f"{args.model_key}_{utility_model_class_name.lower()}"
+    else:
+        save_suffix = args.save_suffix
+
+    # Find and analyze results file
+    results_utilities_path = os.path.join(save_dir, f"results_utilities_{save_suffix}.json")
+    if os.path.exists(results_utilities_path):
+        print(f"\nAnalyzing results from: {results_utilities_path}")
+        
+        # Load results
+        results = load_results(results_utilities_path)
+        
+        # Capture analyze_stated_preferences_results output
+        output_buffer = StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = output_buffer
+        
+        try:
+            analyze_stated_preferences_results(results)
+        finally:
+            sys.stdout = original_stdout
+        
+        analysis_output = output_buffer.getvalue()
+        
+        # Write analysis output to file
+        analysis_output_path = os.path.join(save_dir, f"analysis_{save_suffix}.txt")
+        with open(analysis_output_path, 'w') as f:
+            f.write(analysis_output)
+        print(f"Analysis written to: {analysis_output_path}")
+    else:
+        print(f"Warning: Results file not found at {results_utilities_path}, skipping analysis")
+
+    # Create and write example prompt
+    if len(options_data) >= 2:
+        # Use first two options as example
+        example_option_a = options_data[0]['description']
+        example_option_b = options_data[1]['description']
+        
+        # Format the prompt
+        example_prompt_text = prompt_template.format(
+            option_A=example_option_a,
+            option_B=example_option_b
+        )
+        
+        # Create full example with system message
+        example_prompt_full = f"System Message:\n{system_message}\n\n" + "=" * 60 + "\n\n" + example_prompt_text
+        
+        # Write example prompt to file
+        example_prompt_path = os.path.join(save_dir, f"example_prompt_{save_suffix}.txt")
+        with open(example_prompt_path, 'w') as f:
+            f.write(example_prompt_full)
+        print(f"Example prompt written to: {example_prompt_path}")
+    else:
+        print(f"Warning: Not enough options to create example prompt (found {len(options_data)} options)")
 
     end_time = time.time()
     print(f"Total time taken: {end_time - start_time} seconds")
