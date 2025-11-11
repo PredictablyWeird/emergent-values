@@ -14,141 +14,6 @@ from matplotlib.colors import LogNorm
 sys.path.append('experiments/exchange_rates')
 from evaluate_exchange_rates import X_values, N_values, inflect_option
 
-model_key_to_name = {
-    # ------------------------------
-    # OpenAI Models
-    # ------------------------------
-    "gpt-35-turbo": "GPT 3.5 Turbo",
-    "gpt-4o-mini": "GPT-4o Mini",
-    "gpt-4o": "GPT-4o",
-    "o1-mini": "o1 Mini",
-    "o1": "o1",
-
-    # ------------------------------
-    # Anthropic Models
-    # ------------------------------
-    "claude-3-5-sonnet": "Claude 3.5 Sonnet",
-    "claude-3-haiku": "Claude 3 Haiku",
-    "claude-3-opus": "Claude 3 Opus",
-    "claude-3-sonnet": "Claude 3 Sonnet",
-    "claude-2.1": "Claude 2.1",
-    "claude-2": "Claude 2",
-    "claude-instant-1.2": "Claude Instant 1.2",
-
-    # ------------------------------
-    # Google Models
-    # ------------------------------
-    "gemini-pro": "Gemini Pro",
-    "gemini-15-flash": "Gemini 1.5 Flash",
-    "gemini-20-flash-exp": "Gemini 2.0 Flash Exp",
-    "gemini-15-pro": "Gemini 1.5 Pro",
-
-    # ------------------------------
-    # XAI Models
-    # ------------------------------
-    "grok-2-1212": "Grok 2 1212",
-
-    # ------------------------------
-    # Custom Models
-    # ------------------------------
-    "llama-31-8b-instruct-citizen-assembly":  "Llama 3.1 8B Instruct Citizen Assembly",
-    "llama-31-8b-instruct-citizen-assembly2": "Llama 3.1 8B Instruct Citizen Assembly 2",
-    "llama-31-8b-instruct-citizen-assembly3": "Llama 3.1 8B Instruct Citizen Assembly 3",
-    "llama-31-8b-instruct-citizen-assembly4": "Llama 3.1 8B Instruct Citizen Assembly 4",
-
-    # ------------------------------
-    # Meta Llama
-    # ------------------------------
-    "llama-2-7b":                 "Llama 2 7B",
-    "llama-2-7b-instruct":                 "Llama 2 7B",
-    "llama-2-13b":                 "Llama 2 13B",
-    "llama-2-13b-instruct":                 "Llama 2 13B",
-    "llama-2-70b":                 "Llama 2 70B",
-    "llama-2-70b-instruct":                 "Llama 2 70B",
-    "llama-32-1b":                 "Llama 3.2 1B",
-    "llama-32-1b-instruct":        "Llama 3.2 1B",
-    "llama-32-3b":                 "Llama 3.2 3B",
-    "llama-32-3b-instruct":        "Llama 3.2 3B",
-    "llama-31-8b":                 "Llama 3.1 8B",
-    "llama-31-8b-instruct":        "Llama 3.1 8B",
-    "llama-31-70b":                "Llama 3.1 70B",
-    "llama-31-70b-instruct":       "Llama 3.1 70B",
-    "llama-33-70b-instruct":       "Llama 3.3 70B",
-    "llama-31-405b-fp8":           "Llama 3.1 405B",
-    "llama-31-405b-instruct-fp8":  "Llama 3.1 405B",
-
-    # ------------------------------
-    # Qwen 1.5
-    # ------------------------------
-    "qwen15-05b":           "Qwen1.5 0.5B",
-    "qwen15-05b-instruct":  "Qwen1.5 0.5B Chat",
-    "qwen15-18b":           "Qwen1.5 1.8B",
-    "qwen15-18b-instruct":  "Qwen1.5 1.8B Chat",
-    "qwen15-4b":            "Qwen1.5 4B",
-    "qwen15-4b-instruct":   "Qwen1.5 4B Chat",
-    "qwen15-7b":            "Qwen1.5 7B",
-    "qwen15-7b-instruct":   "Qwen1.5 7B Chat",
-    "qwen15-14b":           "Qwen1.5 14B",
-    "qwen15-14b-instruct":  "Qwen1.5 14B Chat",
-    "qwen15-32b":           "Qwen1.5 32B",
-    "qwen15-32b-instruct":  "Qwen1.5 32B Chat",
-    "qwen15-72b":           "Qwen1.5 72B",
-    "qwen15-72b-instruct":  "Qwen1.5 72B Chat",
-    "qwen15-110b":          "Qwen1.5 110B",
-    "qwen15-110b-instruct": "Qwen1.5 110B Chat",
-
-    # ------------------------------
-    # Qwen 2.5
-    # ------------------------------
-    "qwen25-05b":           "Qwen2.5 0.5B",
-    "qwen25-05b-instruct":  "Qwen2.5 0.5B",
-    "qwen25-15b":           "Qwen2.5 1.5B",
-    "qwen25-15b-instruct":  "Qwen2.5 1.5B",
-    "qwen25-3b":            "Qwen2.5 3B",
-    "qwen25-3b-instruct":   "Qwen2.5 3B",
-    "qwen25-7b":            "Qwen2.5 7B",
-    "qwen25-7b-instruct":   "Qwen2.5 7B",
-    "qwen25-14b":           "Qwen2.5 14B",
-    "qwen25-14b-instruct":  "Qwen2.5 14B",
-    "qwen25-32b":           "Qwen2.5 32B",
-    "qwen25-32b-instruct":  "Qwen2.5 32B",
-    "qwq-32b-preview":      "QwQ 32B Preview",
-    "qwen25-72b":           "Qwen2.5 72B",
-    "qwen25-72b-instruct":  "Qwen2.5 72B",
-
-    # ------------------------------
-    # Google Gemma
-    # ------------------------------
-    "gemma-2-2b":    "Gemma 2 2B",
-    "gemma-2-2b-it": "Gemma 2 2B IT",
-    "gemma-2-9b":    "Gemma 2 9B",
-    "gemma-2-9b-it": "Gemma 2 9B IT",
-    "gemma-2-27b":   "Gemma 2 27B",
-    "gemma-2-27b-it": "Gemma 2 27B IT",
-
-    # ------------------------------
-    # AllenAI OLMo
-    # ------------------------------
-    "olmo-7b":                  "OLMo 7B",
-    "olmo-2-1124-7b-instruct":  "OLMo 2 7B",
-    "olmo-2-1124-13b-instruct": "OLMo 2 13B",
-
-    # ------------------------------
-    # DeepSeek AI
-    # ------------------------------
-    "deepseek-v2":  "DeepSeek V2",
-    "deepseek-v25": "DeepSeek V2.5",
-    "deepseek-v3":  "DeepSeek V3",
-
-    # ------------------------------
-    # Microsoft Phi
-    # ------------------------------
-    "phi-3-mini-4k-instruct":   "Phi 3 Mini 4k Instruct",
-    "phi-3-small-8k-instruct":  "Phi 3 Small 8k Instruct",
-    "phi-3-medium-4k-instruct": "Phi 3 Medium 4k Instruct",
-    "phi-35-mini-instruct":     "Phi 3.5 Mini Instruct",
-    "phi-4":                    "Phi 4",
-}
 
 ###############################################################################
 # Measure Titles: to display on the x-axis label
@@ -310,9 +175,9 @@ def plot_single_model_bar_chart(
                 color=bar_color_above,
                 edgecolor='none',
             )
-            # Label “∞” near the top, like val > max_ratio
+            # Label "∞" near the top, like val > max_ratio
             ax.text(
-                i, top_label_y, "$\infty$",
+                i, top_label_y, r"$\infty$",
                 ha='center', va='top',
                 color=bar_font_color, fontsize=bar_font_size+4,
                 rotation=90
@@ -1077,7 +942,7 @@ def plot_appendix_multi_model_average(
             if val < 0:
                 # negative infinity => place near bottom
                 ax_util.plot([0.2, 0.8], [min_ratio, min_ratio], color='black', linewidth=1.5)
-                label_str = f"{disp_x}: $-\infty$"
+                label_str = f"{disp_x}: $-\\infty$"
                 ax_util.text(
                     1.05, min_ratio,
                     label_str,
@@ -1088,7 +953,7 @@ def plot_appendix_multi_model_average(
             else:
                 # positive infinity => place near top
                 ax_util.plot([0.2, 0.8], [max_ratio, max_ratio], color='black', linewidth=1.5)
-                label_str = f"{disp_x}: $\infty$"
+                label_str = f"{disp_x}: $\\infty$"
                 ax_util.text(
                     1.05, max_ratio,
                     label_str,
