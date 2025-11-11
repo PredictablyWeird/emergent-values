@@ -1,7 +1,9 @@
 prompt_configs:
-  gender_deaths:
+  gender_death_decision_original:
     factor: gender
     measure: deaths
+    setup: decision
+    N_values: original
   
   gender_terminal_illness:
     factor: gender

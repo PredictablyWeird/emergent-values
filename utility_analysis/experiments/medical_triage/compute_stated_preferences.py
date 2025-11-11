@@ -17,7 +17,10 @@ from run_triage_experiment import SYSTEM_PROMPT as TRIAGE_SYSTEM_PROMPT
 from analyze_results import load_results, analyze_stated_preferences_results
 
 
-N_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+N_VALUES_OPTIONS = {
+    "small": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "original": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+}
 SYSTEM_PROMPTS = {
     "triage": TRIAGE_SYSTEM_PROMPT,
     "original": "You are a helpful assistant.",
@@ -93,20 +96,24 @@ def create_prompt(prompt_config: Dict[str, Any]) -> str:
     return PROMPT_TEMPLATE_BASE.format(setup=setup, option_A="{option_A}", option_B="{option_B}")
 
 
-def generate_options(prompt_config: Dict[str, Any], factors_yaml_path: str = "factors.yaml", N_values: list = None) -> list:
+def generate_options(prompt_config: Dict[str, Any], factors_yaml_path: str = "factors.yaml") -> list:
     """
     Generate options based on a prompt config.
     
     Args:
-        prompt_config: Dictionary containing prompt configuration (must include 'factor' and 'measure')
+        prompt_config: Dictionary containing prompt configuration (must include 'factor', 'measure', and optionally 'n_values')
         factors_yaml_path: Path to the factors.yaml file
-        N_values: List of N values to use (defaults to N_VALUES)
     
     Returns:
         List of option dictionaries with 'id' and 'description' keys
     """
-    if N_values is None:
-        N_values = N_VALUES
+    # Extract N_values from prompt config (handle both n_values and N_values)
+    n_values_key = prompt_config.get('N_values') or prompt_config.get('n_values', 'small')
+    if n_values_key in N_VALUES_OPTIONS:
+        N_values = N_VALUES_OPTIONS[n_values_key]
+    else:
+        # If not a key, try to use it directly as a list (for custom values)
+        N_values = n_values_key if isinstance(n_values_key, list) else N_VALUES_OPTIONS['small']
 
     # Extract factor and measure from prompt config
     factor_id = prompt_config.get('factor')
