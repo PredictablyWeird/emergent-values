@@ -9,11 +9,17 @@ Each line in the JSONL output contains:
 - "B": dictionary for option B (with only specified fields)
 - "decision": either "A" or "B"
 
-Field selection is configured via TRIAGE_FIELDS and STATED_PREF_FIELDS:
-- TRIAGE_FIELDS: Configure medical triage fields (severity, group, factors, etc.)
-- STATED_PREF_FIELDS: Configure stated preferences fields (N, X, factor)
+CONFIGURATION (at top of script):
+1. Field Selection:
+   - TRIAGE_FIELDS / STATED_PREF_FIELDS: Which fields to extract
+2. Field Types (for analysis):
+   - TRIAGE_FIELD_TYPES / STATED_PREF_FIELD_TYPES: How to use each field
+   - Options: 'numerical', 'categorical', 'log_numerical'
 
-Modify these config dictionaries at the top of the script to customize field extraction.
+Examples:
+  'severity': 'numerical'       → continuous difference (higher severity = more priority)
+  'group': 'categorical'         → dummy variables (no inherent ordering)
+  'N': 'log_numerical'          → log difference (captures diminishing returns)
 """
 
 import json
@@ -26,23 +32,65 @@ from scipy.stats import chi2
 
 
 # ========== FIELD SELECTION CONFIGURATION ==========
-# Modify these dictionaries to customize which fields are extracted
+# Modify these dictionaries to customize which fields are extracted and how they're used
 
+# STEP 1: Specify which fields to EXTRACT to JSONL file
 # Medical Triage Format: Fields to extract
 TRIAGE_FIELDS = {
     'top_level': ['id', 'description'],
-    'patient_data': ['severity', 'group', 'primary_condition'],
-    'other': ['factors']  # Nested fields like factors
+    'patient_data': ['severity', 'group', 'sofa'],  # Fields from patient_data object
+    'other': ['factors']  # Nested fields like factors (always categorical)
 }
-# Example: To include more patient_data fields, add them to the list:
-# 'patient_data': ['severity', 'group', 'primary_condition', 'patient_id', 'sofa']
+
+# STEP 2: Specify how to USE each field in ANALYSIS
+# Medical Triage: How to use each field for prediction
+# Options: 'categorical', 'numerical', 'log_numerical'
+TRIAGE_FIELD_TYPES = {
+    'severity': 'numerical',      # Continuous variable
+    #'group': 'categorical',        # Dummy variables (no ordering)
+    'sofa': 'numerical',          # Continuous variable
+    # 'factors' (like gender) are always categorical
+}
+# IMPORTANT: Fields in TRIAGE_FIELD_TYPES must also be in TRIAGE_FIELDS['patient_data']
+# Example: To add 'age':
+#   1. Add 'age' to TRIAGE_FIELDS['patient_data']
+#   2. Add 'age': 'numerical' to TRIAGE_FIELD_TYPES
 
 # Stated Preferences Format: Fields to extract
 STATED_PREF_FIELDS = {
     'top_level': ['id', 'description'],
     'direct': ['N', 'X', 'factor']  # Direct top-level fields
 }
-# Example: All fields at the option level go in 'direct' or 'top_level'
+
+# How to use each field for prediction (stated preferences)
+STATED_PREF_FIELD_TYPES = {
+    'N': 'log_numerical',    # Log transform for diminishing returns
+    'X': 'categorical',      # Factor values (no ordering)
+}
+
+# Validation: Ensure field types are defined for fields that will be extracted
+def validate_config():
+    """Validate that FIELD_TYPES and FIELDS configurations are consistent."""
+    # Check triage fields
+    patient_data_fields = TRIAGE_FIELDS.get('patient_data', [])
+    for field in patient_data_fields:
+        if field not in TRIAGE_FIELD_TYPES and field not in ['patient_id', 'primary_condition']:
+            print(f"WARNING: Field '{field}' in TRIAGE_FIELDS['patient_data'] but not in TRIAGE_FIELD_TYPES")
+            print(f"         This field will be extracted but not used in analysis.")
+    
+    for field in TRIAGE_FIELD_TYPES.keys():
+        if field not in patient_data_fields:
+            print(f"WARNING: Field '{field}' in TRIAGE_FIELD_TYPES but not in TRIAGE_FIELDS['patient_data']")
+            print(f"         This field will not be available for analysis.")
+    
+    # Check stated pref fields
+    direct_fields = STATED_PREF_FIELDS.get('direct', [])
+    for field in STATED_PREF_FIELD_TYPES.keys():
+        if field not in direct_fields:
+            print(f"WARNING: Field '{field}' in STATED_PREF_FIELD_TYPES but not in STATED_PREF_FIELDS['direct']")
+            print(f"         This field will not be available for analysis.")
+
+validate_config()
 
 
 def extract_option_fields(option: Dict[str, Any]) -> Dict[str, Any]:
@@ -223,14 +271,14 @@ def analyze_decision_factors(jsonl_path: str) -> None:
         row = {'choice': 1 if decision == 'A' else 0}
         
         if is_medical_triage:
-            # Extract patient data
+            # Extract patient data - dynamically extract all fields from TRIAGE_FIELD_TYPES
             patient_a = option_a.get('patient_data', {})
             patient_b = option_b.get('patient_data', {})
             
-            row['severity_a'] = patient_a.get('severity')
-            row['severity_b'] = patient_b.get('severity')
-            row['group_a'] = patient_a.get('group')
-            row['group_b'] = patient_b.get('group')
+            # Extract all fields specified in TRIAGE_FIELD_TYPES
+            for field_name in TRIAGE_FIELD_TYPES.keys():
+                row[f'{field_name}_a'] = patient_a.get(field_name)
+                row[f'{field_name}_b'] = patient_b.get(field_name)
             
             # Extract factors (e.g., Gender)
             factors_a = option_a.get('factors', {})
@@ -242,11 +290,10 @@ def analyze_decision_factors(jsonl_path: str) -> None:
                 row[f'{factor_name.lower()}_b'] = factor_value
         
         elif is_stated_preferences:
-            # Extract N and X (factor value)
-            row['N_a'] = option_a.get('N')
-            row['N_b'] = option_b.get('N')
-            row['X_a'] = option_a.get('X')
-            row['X_b'] = option_b.get('X')
+            # Extract all fields specified in STATED_PREF_FIELD_TYPES
+            for field_name in STATED_PREF_FIELD_TYPES.keys():
+                row[f'{field_name}_a'] = option_a.get(field_name)
+                row[f'{field_name}_b'] = option_b.get(field_name)
         
         rows.append(row)
     
@@ -256,55 +303,147 @@ def analyze_decision_factors(jsonl_path: str) -> None:
     
     # Create difference variables based on format
     if is_medical_triage:
-        # Severity difference (continuous)
-        df['dsev'] = df['severity_a'] - df['severity_b']
+        # Get field type configuration
+        field_types = TRIAGE_FIELD_TYPES
         
-        # Group difference - treat as categorical by creating dummy variables
-        all_groups = sorted(df['group_a'].unique())
-        reference_group = all_groups[0]  # Use first group as reference
+        # Process each field according to its type
+        numerical_vars = []
+        categorical_var_cols = {}  # field_name -> list of diff columns
         
-        print(f"\nGroups found: {all_groups}")
-        print(f"Using group {reference_group} as reference category")
+        for field_name, field_type in field_types.items():
+            col_a = f'{field_name}_a'
+            col_b = f'{field_name}_b'
+            
+            if col_a not in df.columns or col_b not in df.columns:
+                continue  # Field not present in data
+            
+            if field_type == 'numerical':
+                # Simple difference
+                diff_col = f'd{field_name}'
+                df[diff_col] = df[col_a] - df[col_b]
+                numerical_vars.append(diff_col)
+                print(f"\nField '{field_name}': numerical (using difference)")
+            
+            elif field_type == 'log_numerical':
+                # Log difference
+                diff_col = f'dlog{field_name}'
+                df[diff_col] = pd.Series([
+                    0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
+                    for na, nb in zip(df[col_a], df[col_b])
+                ])
+                numerical_vars.append(diff_col)
+                print(f"\nField '{field_name}': log_numerical (using log difference)")
+            
+            elif field_type == 'categorical':
+                # Create dummy variables
+                unique_values = sorted(set(df[col_a].unique()) | set(df[col_b].unique()))
+                reference_value = unique_values[0]
+                
+                print(f"\nField '{field_name}': categorical")
+                print(f"  Values: {unique_values}")
+                print(f"  Reference: {reference_value}")
+                
+                # Create indicators for each value
+                for val in unique_values:
+                    df[f'{field_name}_a_{val}'] = (df[col_a] == val).astype(int)
+                    df[f'{field_name}_b_{val}'] = (df[col_b] == val).astype(int)
+                
+                # Create difference variables (skip reference)
+                diff_cols = []
+                for val in unique_values[1:]:
+                    diff_col = f'd{field_name}_{val}'
+                    df[diff_col] = df[f'{field_name}_a_{val}'] - df[f'{field_name}_b_{val}']
+                    diff_cols.append(diff_col)
+                
+                categorical_var_cols[field_name] = diff_cols
         
-        for group_num in all_groups:
-            df[f'group_a_{group_num}'] = (df['group_a'] == group_num).astype(int)
-            df[f'group_b_{group_num}'] = (df['group_b'] == group_num).astype(int)
-        
-        # For model, we'll use difference in group indicators
-        # Skip the reference group to avoid multicollinearity
-        group_diff_cols = []
-        for group_num in all_groups[1:]:  # Skip reference group
-            col_name = f'dgroup_{group_num}'
-            df[col_name] = df[f'group_a_{group_num}'] - df[f'group_b_{group_num}']
-            group_diff_cols.append(col_name)
-        
-        # Detect factor columns (gender, etc.)
+        # Detect factor columns (gender, etc.) - always categorical
         factor_columns = [col for col in df.columns if col.endswith('_a') and 
-                         col not in ['severity_a', 'group_a'] and 
-                         not col.startswith('group_a_')]
+                         col not in [f'{f}_a' for f in field_types.keys()] and
+                         not any(col.startswith(f'{f}_a_') for f in field_types.keys())]
         
-        main_var = 'dsev'
-        control_vars = group_diff_cols
+        # Build list of all predictors (numerical + categorical)
+        main_var = None  # Not used when we have all variables in lists
+        # All numerical variables
+        all_numerical = numerical_vars
+        # All categorical variables (from configured fields)
+        all_categorical = [col for cols in categorical_var_cols.values() for col in cols]
+        control_vars = all_numerical + all_categorical
         
     elif is_stated_preferences:
-        # N difference - use both linear and log for diminishing returns
-        df['dN'] = df['N_a'] - df['N_b']
-        df['dlogN'] = pd.Series([
-            0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
-            for na, nb in zip(df['N_a'], df['N_b'])
-        ])
+        # Get field type configuration
+        field_types = STATED_PREF_FIELD_TYPES
         
-        print("\nNumber of patients (N) variable created")
-        print(f"  Using both dN (linear) and dlogN (logarithmic) for diminishing returns")
+        # Process each field according to its type
+        numerical_vars = []
+        categorical_var_cols = {}
+        x_factor_cols = []  # Special: X is the factor being tested
         
-        # Detect factor columns (X values)
-        factor_columns = ['X']  # In stated preferences, X is the factor
+        for field_name, field_type in field_types.items():
+            col_a = f'{field_name}_a'
+            col_b = f'{field_name}_b'
+            
+            if col_a not in df.columns or col_b not in df.columns:
+                continue  # Field not present in data
+            
+            if field_type == 'numerical':
+                # Simple difference
+                diff_col = f'd{field_name}'
+                df[diff_col] = df[col_a] - df[col_b]
+                numerical_vars.append(diff_col)
+                print(f"\nField '{field_name}': numerical (using difference)")
+            
+            elif field_type == 'log_numerical':
+                # Log difference
+                diff_col = f'dlog{field_name}'
+                df[diff_col] = pd.Series([
+                    0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
+                    for na, nb in zip(df[col_a], df[col_b])
+                ])
+                numerical_vars.append(diff_col)
+                print(f"\nField '{field_name}': log_numerical (using log difference, for diminishing returns)")
+            
+            elif field_type == 'categorical':
+                # Create dummy variables
+                unique_values = sorted(set(df[col_a].unique()) | set(df[col_b].unique()))
+                reference_value = unique_values[0]
+                
+                # X is the factor being tested in stated preferences
+                is_factor = (field_name == 'X')
+                
+                print(f"\nField '{field_name}': categorical" + (" (factor being tested)" if is_factor else ""))
+                print(f"  Values: {unique_values}")
+                print(f"  Reference: {reference_value}")
+                
+                # Create indicators for each value
+                for val in unique_values:
+                    df[f'{field_name}_a_{val}'] = (df[col_a] == val).astype(int)
+                    df[f'{field_name}_b_{val}'] = (df[col_b] == val).astype(int)
+                
+                # Create difference variables (skip reference)
+                diff_cols = []
+                for val in unique_values[1:]:
+                    diff_col = f'd{field_name}_{val}'
+                    df[diff_col] = df[f'{field_name}_a_{val}'] - df[f'{field_name}_b_{val}']
+                    diff_cols.append(diff_col)
+                
+                if is_factor:
+                    x_factor_cols.extend(diff_cols)
+                else:
+                    categorical_var_cols[field_name] = diff_cols
         
-        main_var = 'dlogN'  # Use log for main analysis (diminishing returns)
-        control_vars = []  # No group controls in stated preferences
-        group_diff_cols = []
+        # Detect factor columns - for stated preferences, X is the factor
+        factor_columns = []
+        
+        # Build list of all predictors (numerical + categorical control vars, NOT factor)
+        main_var = None  # Not used when we have all variables in lists
+        # All numerical variables
+        all_numerical = numerical_vars
+        # All categorical variables (excluding X factor)
+        all_categorical = [col for cols in categorical_var_cols.values() for col in cols]
+        control_vars = all_numerical + all_categorical
     
-    # Create factor difference variables
+    # Create factor difference variables (always categorical)
     factor_diff_cols = []
     
     if is_medical_triage:
@@ -319,7 +458,9 @@ def analyze_decision_factors(jsonl_path: str) -> None:
                 unique_values.discard(None)
                 unique_values = sorted(unique_values)
                 
-                print(f"\nFactor '{factor_name}' has values: {unique_values}")
+                print(f"\nFactor '{factor_name}': categorical (always)")
+                print(f"  Values: {unique_values}")
+                print(f"  Reference: {unique_values[0]}")
                 
                 # Create difference variable for each value (except reference category)
                 # Use first value alphabetically as reference
@@ -330,28 +471,21 @@ def analyze_decision_factors(jsonl_path: str) -> None:
                     factor_diff_cols.append(diff_col)
     
     elif is_stated_preferences:
-        # Stated preferences: X is the factor value
-        if 'X_a' in df.columns and 'X_b' in df.columns:
-            unique_values = set(df['X_a'].unique()) | set(df['X_b'].unique())
-            unique_values.discard(None)
-            unique_values = sorted(unique_values)
-            
-            print(f"\nFactor (X) has values: {unique_values}")
-            
-            # Create difference variable for each value (except reference category)
-            for value in unique_values[1:]:  # Skip first as reference category
-                diff_col = f'dX_{value}'
-                df[diff_col] = ((df['X_a'] == value).astype(int) - 
-                               (df['X_b'] == value).astype(int))
-                factor_diff_cols.append(diff_col)
+        # Stated preferences: X factor columns were already created
+        factor_diff_cols = x_factor_cols
     
     # Remove rows with missing values
-    required_cols = ['choice', main_var] + control_vars + factor_diff_cols
+    required_cols = ['choice']
+    required_cols.extend(control_vars)
+    required_cols.extend(factor_diff_cols)
+    
     df_clean = df[required_cols].dropna()
     print(f"\nAfter removing NAs: {len(df_clean)} rows")
     
-    # Fit full model (with all variables)
-    X_full = sm.add_constant(df_clean[[main_var] + control_vars + factor_diff_cols])
+    # Fit full model (all variables)
+    all_predictors = control_vars + factor_diff_cols
+    
+    X_full = sm.add_constant(df_clean[all_predictors])
     y = df_clean['choice']
     
     print("\n" + "=" * 60)
@@ -362,13 +496,12 @@ def analyze_decision_factors(jsonl_path: str) -> None:
     print(full_model.summary())
     
     # Fit reduced model (without factor variables)
-    X_reduced = sm.add_constant(df_clean[[main_var] + control_vars])
+    reduced_predictors = control_vars  # All configured fields, no factors
+    
+    X_reduced = sm.add_constant(df_clean[reduced_predictors])
     
     print("\n" + "=" * 60)
-    if is_medical_triage:
-        print("REDUCED MODEL (severity + group only)")
-    elif is_stated_preferences:
-        print("REDUCED MODEL (N only, no factor)")
+    print("REDUCED MODEL (without factors)")
     print("=" * 60)
     
     reduced_model = sm.Logit(y, X_reduced).fit(disp=0)
@@ -401,33 +534,108 @@ def analyze_decision_factors(jsonl_path: str) -> None:
     print("\n" + "=" * 60)
     print("INTERPRETATION")
     print("=" * 60)
-    print("\nPositive coefficients mean:")
-    print("  - Higher value in A relative to B increases probability of choosing A")
     
-    if is_medical_triage:
-        print("\nFor 'dsev' (severity difference):")
-        print("  - Positive coef means higher severity in A increases chance of choosing A")
-        print("  - Negative coef means higher severity in A decreases chance of choosing A")
-        print("\nFor group differences:")
-        print(f"  - Reference group: {reference_group}")
-        print("  - Each dgroup_X coefficient shows effect of A being in group X (vs reference)")
-        print("    relative to B being in group X (vs reference)")
-        print("\nFor factor differences (e.g., gender):")
-        print("  - Each coefficient shows effect relative to reference category")
+    # Extract key coefficients for interpretation
+    coef_names = full_model.params.index.tolist()
+    coef_values = full_model.params.values
     
-    elif is_stated_preferences:
-        print("\nFor 'dlogN' (log number of patients difference):")
-        print("  - Positive coef means more patients in A increases chance of choosing A")
-        print("  - Uses logarithm to capture diminishing returns (saving 10 vs 9 people")
-        print("    matters more than saving 100 vs 99)")
-        print("  - Coefficient represents effect of doubling the number of patients")
-        print("\nFor factor differences (dX_...):")
-        # Get unique X values from the original dataframe
-        if 'X_a' in df.columns:
-            unique_x_values = sorted(set(df['X_a'].unique()) | set(df['X_b'].unique()))
-            reference_x = unique_x_values[0]
-            print(f"  - Reference category: {reference_x}")
-            print(f"  - Each dX_Y coefficient shows effect of Y vs {reference_x}")
+    print("\n1. DIRECTION (sign of coefficient):")
+    print("   Positive coef → higher value in A (vs B) increases probability of choosing A")
+    print("   Negative coef → higher value in A (vs B) decreases probability of choosing A")
+    
+    print("\n2. MAGNITUDE (as odds ratios):")
+    print("   exp(coefficient) = odds ratio")
+    
+    # Show numerical variables
+    numerical_coefs = [(name, full_model.params[name]) for name in coef_names 
+                       if name in all_numerical and name != 'const']
+    if numerical_coefs:
+        print("\n   Numerical variables:")
+        for var_name, coef in numerical_coefs:
+            or_val = np.exp(coef)
+            
+            # Check if it's a log variable
+            if var_name.startswith('dlog'):
+                field_name = var_name[4:]  # Remove 'dlog' prefix
+                double_effect = np.exp(coef * np.log(2))
+                tenfold_effect = np.exp(coef * np.log(10))
+                print(f"   {var_name} = {coef:.3f}")
+                print(f"     → Doubling {field_name} multiplies odds by {double_effect:.2f}x")
+                print(f"     → 10x increase in {field_name} multiplies odds by {tenfold_effect:.2f}x")
+            else:
+                field_name = var_name[1:] if var_name.startswith('d') else var_name
+                print(f"   {var_name} = {coef:.3f} → OR = {or_val:.2f}")
+                print(f"     → Each 1-unit increase in {field_name} multiplies odds by {or_val:.2f}x")
+                if abs(coef) > 0.1:
+                    print(f"     → +2 units in {field_name} has {or_val**2:.2f}x odds")
+    
+    # Show categorical control variables
+    categorical_coefs = [(name, full_model.params[name]) for name in coef_names 
+                        if name in all_categorical and name != 'const']
+    if categorical_coefs:
+        # Group by base field name
+        field_groups = {}
+        for name, coef in categorical_coefs:
+            # Extract field name (e.g., 'group' from 'dgroup_2')
+            if '_' in name:
+                base_name = name.split('_')[0][1:]  # Remove 'd' prefix
+                if base_name not in field_groups:
+                    field_groups[base_name] = []
+                field_groups[base_name].append((name, coef))
+        
+        for field_name, coefs in field_groups.items():
+            print(f"\n   {field_name.capitalize()} effects:")
+            for name, coef in coefs:
+                value = '_'.join(name.split('_')[1:])  # Get the value (e.g., '2' from 'dgroup_2')
+                or_val = np.exp(coef)
+                if coef > 0:
+                    print(f"   {name} = {coef:.3f} → OR = {or_val:.2f} ({field_name} {value} favored by {or_val:.2f}x)")
+                else:
+                    print(f"   {name} = {coef:.3f} → OR = {or_val:.2f} ({field_name} {value} penalized, {1/or_val:.2f}x less likely)")
+    
+    # Factor effects (categorical variables from factors)
+    factor_coefs = [(name, full_model.params[name], np.exp(full_model.params[name])) 
+                    for name in coef_names if name in factor_diff_cols]
+    if factor_coefs:
+        print(f"\n   Factor effects:")
+        # Group by factor name
+        factor_groups = {}
+        for name, coef, or_val in factor_coefs:
+            # Extract factor name (everything before last '_')
+            parts = name.split('_')
+            if len(parts) >= 2:
+                factor_name = '_'.join(parts[:-1])[1:]  # Remove 'd' prefix
+                if factor_name not in factor_groups:
+                    factor_groups[factor_name] = []
+                factor_groups[factor_name].append((name, coef, or_val))
+        
+        for factor_name, coefs in factor_groups.items():
+            print(f"   {factor_name.capitalize()}:")
+            for name, coef, or_val in coefs:
+                value = name.split('_')[-1]  # Get the value (last part)
+                if abs(coef) < 0.001:
+                    print(f"     {name} = {coef:.3f} → OR = {or_val:.3f} (essentially no effect)")
+                elif coef > 0:
+                    print(f"     {name} = {coef:.3f} → OR = {or_val:.2f} ({value} favored by {or_val:.2f}x)")
+                else:
+                    print(f"     {name} = {coef:.3f} → OR = {or_val:.2f} ({value} penalized, {1/or_val:.2f}x less likely)")
+    
+    print("\n3. PRACTICAL SIGNIFICANCE:")
+    print("   Compare coefficient magnitudes to see what matters most")
+    print("   Small coefficients (<0.1) = weak effect")
+    print("   Medium coefficients (0.1-0.5) = moderate effect")
+    print("   Large coefficients (>0.5) = strong effect")
+    
+    print("\n4. BASELINE (when all differences = 0):")
+    const_coef = full_model.params['const']
+    baseline_prob = 1 / (1 + np.exp(-const_coef))
+    print(f"   Constant = {const_coef:.3f}")
+    print(f"   → When A and B are identical, P(choose A) = {baseline_prob:.1%}")
+    if abs(baseline_prob - 0.5) > 0.05:
+        if baseline_prob > 0.5:
+            print(f"   → Bias toward choosing first option (A)")
+        else:
+            print(f"   → Bias toward choosing second option (B)")
     
     print()
 
