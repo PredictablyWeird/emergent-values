@@ -301,178 +301,111 @@ def analyze_decision_factors(jsonl_path: str) -> None:
     print(f"\nDataFrame shape: {df.shape}")
     print(f"Columns: {list(df.columns)}")
     
-    # Create difference variables based on format
+    # Get field type configuration based on format
     if is_medical_triage:
-        # Get field type configuration
         field_types = TRIAGE_FIELD_TYPES
+        factor_field_name = None  # Factors come from nested 'factors' field, not configured
+    elif is_stated_preferences:
+        field_types = STATED_PREF_FIELD_TYPES
+        factor_field_name = 'X'  # X is the factor being tested
+    
+    # Create difference variables (same logic for both formats)
+    numerical_vars = []
+    categorical_var_cols = {}  # field_name -> list of diff columns
+    factor_var_cols = []  # Factor variables (to be tested)
+    
+    for field_name, field_type in field_types.items():
+        col_a = f'{field_name}_a'
+        col_b = f'{field_name}_b'
         
-        # Process each field according to its type
-        numerical_vars = []
-        categorical_var_cols = {}  # field_name -> list of diff columns
+        if col_a not in df.columns or col_b not in df.columns:
+            continue  # Field not present in data
         
-        for field_name, field_type in field_types.items():
-            col_a = f'{field_name}_a'
-            col_b = f'{field_name}_b'
+        # Check if this field is the factor being tested
+        is_factor = (field_name == factor_field_name)
+        
+        if field_type == 'numerical':
+            # Simple difference
+            diff_col = f'd{field_name}'
+            df[diff_col] = df[col_a] - df[col_b]
+            numerical_vars.append(diff_col)
+            print(f"\nField '{field_name}': numerical (using difference)")
+        
+        elif field_type == 'log_numerical':
+            # Log difference
+            diff_col = f'dlog{field_name}'
+            df[diff_col] = pd.Series([
+                0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
+                for na, nb in zip(df[col_a], df[col_b])
+            ])
+            numerical_vars.append(diff_col)
+            print(f"\nField '{field_name}': log_numerical (using log difference, for diminishing returns)")
+        
+        elif field_type == 'categorical':
+            # Create dummy variables
+            unique_values = sorted(set(df[col_a].unique()) | set(df[col_b].unique()))
+            reference_value = unique_values[0]
             
-            if col_a not in df.columns or col_b not in df.columns:
-                continue  # Field not present in data
+            print(f"\nField '{field_name}': categorical" + (" (factor being tested)" if is_factor else ""))
+            print(f"  Values: {unique_values}")
+            print(f"  Reference: {reference_value}")
             
-            if field_type == 'numerical':
-                # Simple difference
-                diff_col = f'd{field_name}'
-                df[diff_col] = df[col_a] - df[col_b]
-                numerical_vars.append(diff_col)
-                print(f"\nField '{field_name}': numerical (using difference)")
+            # Create indicators for each value
+            for val in unique_values:
+                df[f'{field_name}_a_{val}'] = (df[col_a] == val).astype(int)
+                df[f'{field_name}_b_{val}'] = (df[col_b] == val).astype(int)
             
-            elif field_type == 'log_numerical':
-                # Log difference
-                diff_col = f'dlog{field_name}'
-                df[diff_col] = pd.Series([
-                    0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
-                    for na, nb in zip(df[col_a], df[col_b])
-                ])
-                numerical_vars.append(diff_col)
-                print(f"\nField '{field_name}': log_numerical (using log difference)")
+            # Create difference variables (skip reference)
+            diff_cols = []
+            for val in unique_values[1:]:
+                diff_col = f'd{field_name}_{val}'
+                df[diff_col] = df[f'{field_name}_a_{val}'] - df[f'{field_name}_b_{val}']
+                diff_cols.append(diff_col)
             
-            elif field_type == 'categorical':
-                # Create dummy variables
-                unique_values = sorted(set(df[col_a].unique()) | set(df[col_b].unique()))
-                reference_value = unique_values[0]
-                
-                print(f"\nField '{field_name}': categorical")
-                print(f"  Values: {unique_values}")
-                print(f"  Reference: {reference_value}")
-                
-                # Create indicators for each value
-                for val in unique_values:
-                    df[f'{field_name}_a_{val}'] = (df[col_a] == val).astype(int)
-                    df[f'{field_name}_b_{val}'] = (df[col_b] == val).astype(int)
-                
-                # Create difference variables (skip reference)
-                diff_cols = []
-                for val in unique_values[1:]:
-                    diff_col = f'd{field_name}_{val}'
-                    df[diff_col] = df[f'{field_name}_a_{val}'] - df[f'{field_name}_b_{val}']
-                    diff_cols.append(diff_col)
-                
+            # Separate factors from control variables
+            if is_factor:
+                factor_var_cols.extend(diff_cols)
+            else:
                 categorical_var_cols[field_name] = diff_cols
-        
-        # Detect factor columns (gender, etc.) - always categorical
+    
+    # Detect additional factor columns (medical triage: factors from nested 'factors' field)
+    if is_medical_triage:
         factor_columns = [col for col in df.columns if col.endswith('_a') and 
                          col not in [f'{f}_a' for f in field_types.keys()] and
                          not any(col.startswith(f'{f}_a_') for f in field_types.keys())]
-        
-        # Build list of all predictors (numerical + categorical)
-        main_var = None  # Not used when we have all variables in lists
-        # All numerical variables
-        all_numerical = numerical_vars
-        # All categorical variables (from configured fields)
-        all_categorical = [col for cols in categorical_var_cols.values() for col in cols]
-        control_vars = all_numerical + all_categorical
-        
-    elif is_stated_preferences:
-        # Get field type configuration
-        field_types = STATED_PREF_FIELD_TYPES
-        
-        # Process each field according to its type
-        numerical_vars = []
-        categorical_var_cols = {}
-        x_factor_cols = []  # Special: X is the factor being tested
-        
-        for field_name, field_type in field_types.items():
-            col_a = f'{field_name}_a'
-            col_b = f'{field_name}_b'
-            
-            if col_a not in df.columns or col_b not in df.columns:
-                continue  # Field not present in data
-            
-            if field_type == 'numerical':
-                # Simple difference
-                diff_col = f'd{field_name}'
-                df[diff_col] = df[col_a] - df[col_b]
-                numerical_vars.append(diff_col)
-                print(f"\nField '{field_name}': numerical (using difference)")
-            
-            elif field_type == 'log_numerical':
-                # Log difference
-                diff_col = f'dlog{field_name}'
-                df[diff_col] = pd.Series([
-                    0 if na == nb else (np.log(na) - np.log(nb) if na > 0 and nb > 0 else 0)
-                    for na, nb in zip(df[col_a], df[col_b])
-                ])
-                numerical_vars.append(diff_col)
-                print(f"\nField '{field_name}': log_numerical (using log difference, for diminishing returns)")
-            
-            elif field_type == 'categorical':
-                # Create dummy variables
-                unique_values = sorted(set(df[col_a].unique()) | set(df[col_b].unique()))
-                reference_value = unique_values[0]
-                
-                # X is the factor being tested in stated preferences
-                is_factor = (field_name == 'X')
-                
-                print(f"\nField '{field_name}': categorical" + (" (factor being tested)" if is_factor else ""))
-                print(f"  Values: {unique_values}")
-                print(f"  Reference: {reference_value}")
-                
-                # Create indicators for each value
-                for val in unique_values:
-                    df[f'{field_name}_a_{val}'] = (df[col_a] == val).astype(int)
-                    df[f'{field_name}_b_{val}'] = (df[col_b] == val).astype(int)
-                
-                # Create difference variables (skip reference)
-                diff_cols = []
-                for val in unique_values[1:]:
-                    diff_col = f'd{field_name}_{val}'
-                    df[diff_col] = df[f'{field_name}_a_{val}'] - df[f'{field_name}_b_{val}']
-                    diff_cols.append(diff_col)
-                
-                if is_factor:
-                    x_factor_cols.extend(diff_cols)
-                else:
-                    categorical_var_cols[field_name] = diff_cols
-        
-        # Detect factor columns - for stated preferences, X is the factor
+    else:
         factor_columns = []
+    
+    # Build list of all predictors (numerical + categorical controls)
+    all_numerical = numerical_vars
+    all_categorical = [col for cols in categorical_var_cols.values() for col in cols]
+    control_vars = all_numerical + all_categorical
+    
+    # Process additional factor columns (medical triage: nested factors like Gender)
+    # For stated preferences, factor columns were already created in main loop
+    factor_diff_cols = list(factor_var_cols)  # Start with factors from configured fields
+    
+    # Medical triage: add factors from nested 'factors' field
+    for col_a in factor_columns:
+        factor_name = col_a[:-2]  # Remove '_a' suffix
+        col_b = f'{factor_name}_b'
         
-        # Build list of all predictors (numerical + categorical control vars, NOT factor)
-        main_var = None  # Not used when we have all variables in lists
-        # All numerical variables
-        all_numerical = numerical_vars
-        # All categorical variables (excluding X factor)
-        all_categorical = [col for cols in categorical_var_cols.values() for col in cols]
-        control_vars = all_numerical + all_categorical
-    
-    # Create factor difference variables (always categorical)
-    factor_diff_cols = []
-    
-    if is_medical_triage:
-        # Medical triage: factors are in separate columns with names
-        for col_a in factor_columns:
-            factor_name = col_a[:-2]  # Remove '_a' suffix
-            col_b = f'{factor_name}_b'
+        if col_b in df.columns:
+            # Get unique values for this factor
+            unique_values = set(df[col_a].unique()) | set(df[col_b].unique())
+            unique_values.discard(None)
+            unique_values = sorted(unique_values)
             
-            if col_b in df.columns:
-                # Get unique values for this factor
-                unique_values = set(df[col_a].unique()) | set(df[col_b].unique())
-                unique_values.discard(None)
-                unique_values = sorted(unique_values)
-                
-                print(f"\nFactor '{factor_name}': categorical (always)")
-                print(f"  Values: {unique_values}")
-                print(f"  Reference: {unique_values[0]}")
-                
-                # Create difference variable for each value (except reference category)
-                # Use first value alphabetically as reference
-                for value in unique_values[1:]:  # Skip first as reference category
-                    diff_col = f'd{factor_name}_{value}'
-                    df[diff_col] = ((df[col_a] == value).astype(int) - 
-                                   (df[col_b] == value).astype(int))
-                    factor_diff_cols.append(diff_col)
-    
-    elif is_stated_preferences:
-        # Stated preferences: X factor columns were already created
-        factor_diff_cols = x_factor_cols
+            print(f"\nFactor '{factor_name}': categorical (from nested factors)")
+            print(f"  Values: {unique_values}")
+            print(f"  Reference: {unique_values[0]}")
+            
+            # Create difference variable for each value (except reference category)
+            for value in unique_values[1:]:  # Skip first as reference category
+                diff_col = f'd{factor_name}_{value}'
+                df[diff_col] = ((df[col_a] == value).astype(int) - 
+                               (df[col_b] == value).astype(int))
+                factor_diff_cols.append(diff_col)
     
     # Remove rows with missing values
     required_cols = ['choice']
