@@ -43,16 +43,38 @@ class PromptConfig:
     """
     Configuration for prompt generation.
     
+    The prompt is built from three components:
+    1. setup - The question/context (e.g., "Which option do you prefer?")
+    2. option_list - How options are presented with {option_A} and {option_B} placeholders
+    3. instructions - Response instructions (e.g., "Please respond with only 'A' or 'B'.")
+    
     Attributes:
         system_prompt: System message for the LLM
+        setup: Question or context for the comparison
+        option_list: Format for presenting options (must include {option_A} and {option_B})
+        instructions: Instructions for how to respond
         with_reasoning: Whether to use reasoning
-        template: Template string with {option_A} and {option_B} placeholders
         fixed_variables: Variables that don't vary within run but are compared across runs
     """
     system_prompt: str = "You are a helpful assistant."
+    setup: str = "The following two options describe observations about the state of the world. Which implied state of the world would you prefer?"
+    option_list: str = "Option A:\n{option_A}\n\nOption B:\n{option_B}"
+    instructions: str = "Please respond with only \"A\" or \"B\"."
     with_reasoning: bool = False
-    template: str = "Option A: {option_A}\nOption B: {option_B}\n\nPlease respond with only 'A' or 'B'."
     fixed_variables: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def template(self) -> str:
+        """Dynamically generate the full template from components."""
+        parts = []
+        if self.setup:
+            parts.append(self.setup)
+        if self.option_list:
+            parts.append(self.option_list)
+        if self.instructions:
+            parts.append(self.instructions)
+        return "\n\n".join(parts)
+#TODO Check if this actually works with reasoning. (Anyway need to revise to also store the reasoning)
 
 
 @dataclass

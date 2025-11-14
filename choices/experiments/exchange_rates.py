@@ -184,15 +184,7 @@ def create_experiment_from_yaml_config(
     
     prompt_config = PromptConfig(
         system_prompt=system_msg,
-        template=f"""{setup_text}
-
-Option A:
-{{option_A}}
-
-Option B:
-{{option_B}}
-
-Please respond with only "A" or "B".""",
+        setup=setup_text,
         with_reasoning=False
     )
     
