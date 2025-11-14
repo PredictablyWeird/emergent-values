@@ -106,11 +106,12 @@ class Experiment:
         variables: Union[Dict[str, List[Any]], Dict[str, Variable]],
         prompt_config: PromptConfig,
         experiment_config: ExperimentConfig,
-        option_text_fn: Callable[[Dict[str, Any]], str],
+        option_text_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
         edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
         response_parser: Optional[Callable[[str], ResponseData]] = None,
         run_id: Optional[str] = None,
-        unique_fields: Optional[List[str]] = None
+        unique_fields: Optional[List[str]] = None,
+        custom_prompt_generator: Optional[Callable[[Dict, Dict, str], str]] = None
     ):
         """
         Initialize experiment.
@@ -118,14 +119,16 @@ class Experiment:
         Args:
             name: Experiment name (used for directories)
             variables: Dict mapping variable names to lists of values OR Variable objects
-            prompt_config: Configuration for prompt generation
+            prompt_config: Configuration for prompt generation (can have empty fields if using custom_prompt_generator)
             experiment_config: Configuration for running the experiment
-            option_text_fn: Function to generate text from variables dict
+            option_text_fn: Function to generate text from variables dict. Not used if custom_prompt_generator is provided.
             edge_filter: Optional function returning False to exclude edge.
                         Called with (variables_a, variables_b)
             response_parser: Function to parse LLM responses. If None, uses default
             run_id: Run identifier. If None, auto-generated
             unique_fields: Fields passed to PreferenceGraph for edge filtering
+            custom_prompt_generator: Optional function(option_A_dict, option_B_dict, direction) -> prompt_str
+                                    If provided, this overrides the PromptConfig template-based generation
         """
         self.name = self._sanitize_name(name)
         
@@ -139,6 +142,7 @@ class Experiment:
         self.response_parser = response_parser or self._default_response_parser
         self.run_id = run_id or self._generate_run_id()
         self.unique_fields = unique_fields
+        self.custom_prompt_generator = custom_prompt_generator
         
         # Generated lazily
         self._options = None
@@ -188,7 +192,7 @@ class Experiment:
         Generate all options from cartesian product of variables.
         
         Returns list of option dicts with:
-        - 'id': unique identifier
+        - 'id': unique identifier (simple integer)
         - 'description': text representation
         - All variable key-value pairs
         """
@@ -196,21 +200,36 @@ class Experiment:
         var_names = list(self.variables.keys())
         var_values = [self.variables[name].values for name in var_names]
         
-        for combo in itertools.product(*var_values):
+        for idx, combo in enumerate(itertools.product(*var_values)):
             variables = dict(zip(var_names, combo))
             
             # Generate text
-            text = self.option_text_fn(variables)
+            if self.option_text_fn:
+                text = self.option_text_fn(variables)
+            else:
+                # If no option_text_fn provided (e.g., when using custom prompt generator),
+                # create a simple description from variables
+                text = ", ".join([f"{name}={val}" for name, val in variables.items()])
             
-            # Generate ID from variables
-            option_id = "_".join([f"{name}={val}" for name, val in variables.items()])
+            # Generate simple integer ID
+            option_id = idx
             
-            # Create option dict
+            # Create option dict with all variable data
             option = {
                 'id': option_id,
                 'description': text,
                 **variables  # Include all variables in the option dict
             }
+            
+            # Extract simple fields from nested dicts for better summary formatting
+            # (compute_utilities skips dict/list fields when generating summaries)
+            for var_name, var_value in variables.items():
+                if isinstance(var_value, dict):
+                    # Extract an 'id' or '_id' field if it exists
+                    for id_field in ['id', 'patient_id', 'item_id', 'option_id']:
+                        if id_field in var_value:
+                            option[f'{var_name}_{id_field}'] = var_value[id_field]
+                            break
             
             options.append(option)
         
@@ -286,13 +305,18 @@ class Experiment:
         node_b = graph.options_by_id[node_b_id]
         
         # Generate the prompt text
-        option_a_text = node_a['description']
-        option_b_text = node_b['description']
-        
-        prompt_text = self.prompt_config.template.format(
-            option_A=option_a_text,
-            option_B=option_b_text
-        )
+        if self.custom_prompt_generator:
+            # Use custom prompt generator - it receives the full option dictionaries
+            prompt_text = self.custom_prompt_generator(node_a, node_b, 'original')
+        else:
+            # Use template-based generation
+            option_a_text = node_a['description']
+            option_b_text = node_b['description']
+            
+            prompt_text = self.prompt_config.template.format(
+                option_A=option_a_text,
+                option_B=option_b_text
+            )
         
         # Create full example with system message
         full_example = f"System Message:\n{self.prompt_config.system_prompt}\n\n{'='*60}\n\n{prompt_text}"
@@ -362,6 +386,12 @@ class Experiment:
             print(f"Saved example prompt to: {os.path.join(save_path, 'example_prompt.txt')}")
             print(f"\nRunning compute_utilities...")
         
+        # Determine which prompt template/generator to use
+        if self.custom_prompt_generator:
+            comparison_prompt = self.custom_prompt_generator
+        else:
+            comparison_prompt = self.prompt_config.template
+        
         # Run compute_utilities
         results = await compute_utilities(
             options_list=options,
@@ -374,7 +404,7 @@ class Experiment:
             save_suffix=None,
             with_reasoning=self.prompt_config.with_reasoning,
             system_message=self.prompt_config.system_prompt,
-            comparison_prompt_template=self.prompt_config.template,
+            comparison_prompt_template=comparison_prompt,
         )
         
         if verbose:
