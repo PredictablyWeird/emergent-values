@@ -241,6 +241,48 @@ class Experiment:
         """Parse an LLM response."""
         return self.response_parser(response)
     
+    def _save_example_prompt(self, graph: PreferenceGraph, save_path: str):
+        """
+        Save an example prompt from a random edge in the graph.
+        
+        Args:
+            graph: PreferenceGraph with edges
+            save_path: Directory to save the example prompt
+        """
+        import random
+        
+        # Get a random edge
+        if not graph.training_edges_pool:
+            return  # No edges to sample from
+        
+        edge_ids = list(graph.training_edges_pool)
+        random_edge = random.choice(edge_ids)
+        
+        # Get the nodes
+        node_a_id, node_b_id = random_edge
+        node_a = graph.options_by_id[node_a_id]
+        node_b = graph.options_by_id[node_b_id]
+        
+        # Generate the prompt text
+        option_a_text = node_a['description']
+        option_b_text = node_b['description']
+        
+        prompt_text = self.prompt_config.template.format(
+            option_A=option_a_text,
+            option_B=option_b_text
+        )
+        
+        # Create full example with system message
+        full_example = f"System Message:\n{self.prompt_config.system_prompt}\n\n{'='*60}\n\n{prompt_text}"
+        
+        # Save to file
+        example_path = os.path.join(save_path, "example_prompt.txt")
+        with open(example_path, 'w') as f:
+            f.write(full_example)
+            f.write(f"\n\n{'='*60}\n")
+            f.write(f"Option A ID: {node_a_id}\n")
+            f.write(f"Option B ID: {node_b_id}\n")
+    
     def get_save_dir(self, base_dir: str = "results") -> str:
         """Get directory for saving results."""
         return os.path.join(base_dir, self.name, self.experiment_config.model, self.run_id)
@@ -290,6 +332,12 @@ class Experiment:
         
         if verbose:
             print(f"\nSave directory: {save_path}")
+        
+        # Save example prompt from a random edge
+        self._save_example_prompt(graph, save_path)
+        
+        if verbose:
+            print(f"Saved example prompt to: {os.path.join(save_path, 'example_prompt.txt')}")
             print(f"\nRunning compute_utilities...")
         
         # Run compute_utilities
