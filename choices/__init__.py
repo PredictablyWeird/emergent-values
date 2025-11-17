@@ -21,6 +21,13 @@ from .variable import (
     ordinal,
 )
 
+from .results import (
+    ExperimentResults,
+    PreferenceGraphResults,
+    UtilityModelResults,
+    ExperimentOption,
+)
+
 __all__ = [
     'Experiment',
     'ExperimentConfig',
@@ -31,4 +38,8 @@ __all__ = [
     'categorical',
     'numerical',
     'ordinal',
+    'ExperimentResults',
+    'PreferenceGraphResults',
+    'UtilityModelResults',
+    'ExperimentOption',
 ]

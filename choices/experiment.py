@@ -266,7 +266,7 @@ class Experiment:
             verbose: Whether to print progress
             
         Returns:
-            Dictionary with results including utilities and metrics
+            ExperimentResults object with structured results including utilities and metrics
         """
         if verbose:
             print(f"\n{'='*80}")
@@ -323,13 +323,13 @@ class Experiment:
             comparison_prompt_template=comparison_prompt,
             unique_fields=self.unique_fields,
             edge_filter=self.edge_filter,
+            variables=self.variables,  # Pass variables for metadata
         )
         
         if verbose:
             print(f"\n{'='*80}")
             print(f"Experiment complete!")
-            if 'utilities' in results:
-                print(f"Computed utilities for {len(results['utilities'])} options")
+            print(f"Computed utilities for {len(results.utility_model.utilities)} options")
             print(f"Results saved to: {save_path}")
             print(f"{'='*80}\n")
         

@@ -309,7 +309,7 @@ async def run_triage_experiment(
     
     # Validate max_tokens if return_json is True
     if return_json:
-        from choices.core.utils import load_config
+        from choices.utils import load_config
         
         # Determine agent config key (same logic as in Experiment.run)
         agent_config_key = experiment_config.agent_config_key

@@ -13,6 +13,12 @@ from ..utils import (
     load_config,
     evaluate_holdout_set
 )
+from ..results import (
+    ExperimentResults,
+    PreferenceGraphResults,
+    UtilityModelResults,
+    ExperimentOption,
+)
 from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 
 from .thurstonian import (
@@ -433,8 +439,9 @@ async def compute_utilities(
     save_dir: str = "results",
     save_suffix: Optional[str] = None,
     unique_fields: Optional[List[str]] = None,
-    edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None
-) -> Dict[str, Any]:
+    edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
+    variables: Optional[Dict[str, Any]] = None
+) -> ExperimentResults:
     """
     Compute utilities for a set of options using a specified utility model.
     
@@ -456,9 +463,11 @@ async def compute_utilities(
                 then edges between options with the same patient_data will be excluded.
         edge_filter: Optional function returning True to keep edge, False to exclude.
                 Called with (option_a, option_b) dictionaries.
+        variables: Optional dictionary mapping variable names to Variable objects. Used to preserve
+                variable metadata (type, values, etc.) in the results for analysis scripts.
         
     Returns:
-        Dictionary containing results data
+        ExperimentResults object containing structured results with graph data and utility model
     """
     # Load compute utilities config
     compute_utilities_config = load_config(compute_utilities_config_path, compute_utilities_config_key, "compute_utilities.yaml")
@@ -544,10 +553,13 @@ async def compute_utilities(
     preference_graph_arguments = compute_utilities_config.get('preference_graph_arguments', {})
     # Use unique_fields from parameter if provided, otherwise from config
     unique_fields_param = unique_fields if unique_fields is not None else preference_graph_arguments.get('unique_fields', None)
+    holdout_fraction = preference_graph_arguments.get('holdout_fraction', 0.0)
+    holdout_seed = preference_graph_arguments.get('holdout_seed', 42)
+    
     graph = PreferenceGraph(
         options=options,
-        holdout_fraction=preference_graph_arguments.get('holdout_fraction', 0.0),
-        seed=preference_graph_arguments.get('holdout_seed', 42),
+        holdout_fraction=holdout_fraction,
+        seed=holdout_seed,
         unique_fields=unique_fields_param
     )
     
@@ -594,7 +606,7 @@ async def compute_utilities(
         K=compute_utilities_arguments.get('K', 10)
     )
     
-    # Prepare results
+    # Prepare results using structured format
     # Create a serializable version of the config (convert callable to string)
     serializable_config = copy.deepcopy(compute_utilities_config)
     if 'compute_utilities_arguments' in serializable_config:
@@ -605,16 +617,44 @@ async def compute_utilities(
                 func_name = getattr(template, '__name__', 'unknown')
                 serializable_config['compute_utilities_arguments']['comparison_prompt_template'] = f"<callable: {func_name}>"
     
-    results = {
-        'options': options,
-        'utilities': utilities,
-        'metrics': metrics,  # Training metrics
-        'holdout_metrics': holdout_metrics,  # Holdout metrics (if computed)
+    # Create PreferenceGraphResults
+    graph_config = {
         'compute_utilities_config': serializable_config,
-        'graph_data': graph.export_data()  # Raw preference graph data
+        'preference_graph_arguments': {
+            'holdout_fraction': holdout_fraction,
+            'holdout_seed': holdout_seed
+        }
     }
     if create_agent_config_path is not None:
-        results['create_agent_config'] = create_agent_config
+        graph_config['create_agent_config'] = create_agent_config
+    
+    graph_data = graph.export_data()
+    graph_results = PreferenceGraphResults(
+        options=[ExperimentOption.from_dict(opt) for opt in options],
+        edges=graph_data['edges'],
+        training_edges=graph_data['training_edges'],
+        holdout_edges=graph_data.get('holdout_edge_indices'),
+        variables=variables if variables is not None else {},
+        config=graph_config
+    )
+    
+    # Create UtilityModelResults
+    # Normalize utility keys to strings for consistent access
+    utilities_normalized = {str(k): v for k, v in utilities.items()}
+    
+    model_config = {
+        'utility_model_class': utility_model_class_name,
+        'utility_model_arguments': utility_model_arguments
+    }
+    utility_results = UtilityModelResults(
+        utilities=utilities_normalized,
+        training_metrics=metrics,
+        holdout_metrics=holdout_metrics,
+        model_config=model_config
+    )
+    
+    # Combine into ExperimentResults
+    results = ExperimentResults(graph=graph_results, utility_model=utility_results)
     
     # Save results if directory provided
     if save_dir:
@@ -622,94 +662,29 @@ async def compute_utilities(
         
         # Determine save suffix
         if save_suffix is None:
-            save_suffix = f"{model_key}_{utility_model_class_name.lower()}"
-            
-        # Convert NumPy types to native Python types before saving
-        results_to_save = convert_numpy(results)
-            
-        # Save the full results JSON
-        results_path = os.path.join(save_dir, f"results_{save_suffix}.json")
-        with open(results_path, 'w') as f:
-            json.dump(results_to_save, f, indent=2)
+            save_suffix = model_key
         
-        # Save a separate utilities-only JSON (without raw preference graph data)
-        results_utilities_path = os.path.join(save_dir, f"results_utilities_{save_suffix}.json")
-        results_utilities_to_save = {k: v for k, v in results_to_save.items() if k != 'graph_data'}
-        with open(results_utilities_path, 'w') as f:
-            json.dump(results_utilities_to_save, f, indent=2)
+        # Use structured save method (handles all conversions internally)
+        results.save(save_dir, save_suffix)
             
         # Save a short summary txt
         summary_path = os.path.join(save_dir, f"summary_{save_suffix}.txt")
         with open(summary_path, 'w') as f:
             f.write(f"Utility Model: {utility_model_class_name}\n\n")
             f.write("Training Metrics:\n")
-            for k, v in metrics.items():
+            for k, v in results.utility_model.training_metrics.items():
                 f.write(f"{k}: {v}\n")
-            if holdout_metrics:
+            if results.utility_model.holdout_metrics:
                 f.write("\nHoldout Metrics:\n")
-                for k, v in holdout_metrics.items():
+                for k, v in results.utility_model.holdout_metrics.items():
                     f.write(f"{k}: {v}\n")
             f.write("\nSorted utilities:\n")
-            # Create a function to format option representation
-            def format_option(opt):
-                """Format option representation, preferring factor fields if available."""
-                # Check if this is a medical triage option with patient_data
-                if 'patient_data' in opt and isinstance(opt['patient_data'], dict):
-                    patient_data = opt['patient_data']
-                    parts = []
-                    
-                    # Add severity and group if available
-                    if 'severity' in patient_data:
-                        parts.append(f"Severity={patient_data['severity']}")
-                    if 'group' in patient_data:
-                        parts.append(f"Group={patient_data['group']}")
-                    
-                    # Add factor fields if available (factors may be stored as a dict under 'factors' key)
-                    factor_fields = []
-                    if 'factors' in opt and isinstance(opt['factors'], dict):
-                        # Factors are stored as a dictionary
-                        for factor_name, factor_value in opt['factors'].items():
-                            factor_fields.append(f"{factor_name}={factor_value}")
-                    else:
-                        # Check for factor fields as top-level keys
-                        for key in opt.keys():
-                            if key not in ['id', 'description', 'patient_data', 'factors'] and not key.startswith('_'):
-                                # Check if it looks like a factor field (not a dict/list)
-                                if not isinstance(opt[key], (dict, list)):
-                                    factor_fields.append(f"{key}={opt[key]}")
-                    
-                    if factor_fields:
-                        parts.extend(factor_fields)
-                    
-                    if parts:
-                        return f"({', '.join(parts)})"
-                
-                # Fallback: check for common factor field patterns
-                factor_fields = []
-                # Check if factors are stored as a dictionary
-                if 'factors' in opt and isinstance(opt['factors'], dict):
-                    for factor_name, factor_value in opt['factors'].items():
-                        factor_fields.append(f"{factor_name}={factor_value}")
-                else:
-                    # Check for factor fields as top-level keys
-                    for key in opt.keys():
-                        if key not in ['id', 'description', 'factors'] and not key.startswith('_'):
-                            # Check if it looks like a factor field (not a dict/list)
-                            if not isinstance(opt[key], (dict, list)):
-                                factor_fields.append(f"{key}={opt[key]}")
-                
-                if factor_fields:
-                    return f"({', '.join(factor_fields)})"
-                else:
-                    return opt['description']
-            
-            sorted_utils = sorted(
-                [(format_option(opt), utilities[opt['id']]) for opt in options],
-                key=lambda x: x[1]['mean'],
-                reverse=True
-            )
-            for opt_repr, util in sorted_utils:
-                f.write(f"{opt_repr}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+            # Write sorted options with utilities
+            sorted_results = results.get_sorted_results(reverse=True)
+            for opt, util in sorted_results:
+                # Truncate long descriptions for readability
+                desc = opt.description[:80] + "..." if len(opt.description) > 80 else opt.description
+                f.write(f"{desc}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
     
     # Ensure all async tasks are completed before returning
     # This prevents the script from hanging due to pending tasks
