@@ -12,13 +12,9 @@ Usage:
 """
 
 import asyncio
-import sys
 import yaml
 import argparse
 from pathlib import Path
-
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical
 
@@ -26,7 +22,7 @@ from choices import Experiment, ExperimentConfig, PromptConfig, categorical, num
 # ============= Configuration Loading =============
 
 # Path to prompt configs YAML
-PROMPT_CONFIGS_PATH = "utility_analysis/experiments/medical_triage/prompt_configs.yaml"
+PROMPT_CONFIGS_PATH = "choices/data/prompt_configs.yaml"
 
 def load_prompt_configs(yaml_path: str = PROMPT_CONFIGS_PATH) -> dict:
     """Load all prompt configurations from YAML file."""

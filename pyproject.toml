@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["utility_analysis"]
+packages = ["utility_analysis", "choices"]
 
 [build-system]
 requires = ["hatchling"]

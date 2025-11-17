@@ -12,10 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, Union
 from datetime import datetime
 
-# Add utility_analysis to path
-sys.path.append(str(Path(__file__).parent.parent.parent / "utility_analysis"))
-
-from compute_utilities.compute_utilities import PreferenceGraph, compute_utilities
+from .utilities import PreferenceGraph, compute_utilities
 from .variable import Variable, VariableType
 
 
@@ -32,9 +29,9 @@ class ExperimentConfig:
         agent_config_key: Key in create_agent config (None = auto-select)
     """
     model: str = "gpt-4o-mini"
-    utility_config_path: str = "utility_analysis/compute_utilities/compute_utilities.yaml"
+    utility_config_path: str = "choices/config/compute_utilities.yaml"
     utility_config_key: str = "thurstonian_active_learning_k5"
-    agent_config_path: str = "utility_analysis/compute_utilities/create_agent.yaml"
+    agent_config_path: str = "choices/config/create_agent.yaml"
     agent_config_key: Optional[str] = None
 
 

@@ -6,11 +6,14 @@ Provides the Experiment class for defining and running experiments.
 
 __version__ = "0.2.0"
 
-from .core import (
+from .experiment import (
     Experiment,
     ExperimentConfig,
     PromptConfig,
     ResponseData,
+)
+
+from .variable import (
     Variable,
     VariableType,
     categorical,
