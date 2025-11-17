@@ -364,6 +364,61 @@ class PreferenceGraph:
         return random.sample(edges_list, n_edges)
 
 
+def _save_example_prompt(
+    graph: PreferenceGraph, 
+    comparison_prompt_template: Union[str, Callable],
+    system_message: str,
+    save_path: str
+) -> None:
+    """
+    Save an example prompt from a random edge in the graph.
+    
+    Args:
+        graph: PreferenceGraph with edges
+        comparison_prompt_template: Template string or callable for generating prompts
+        system_message: System message to include in the example
+        save_path: Directory to save the example prompt
+    """
+    import random
+    
+    # Get a random edge
+    if not graph.training_edges_pool:
+        return  # No edges to sample from
+    
+    edge_ids = list(graph.training_edges_pool)
+    random_edge = random.choice(edge_ids)
+    
+    # Get the nodes
+    node_a_id, node_b_id = random_edge
+    node_a = graph.options_by_id[node_a_id]
+    node_b = graph.options_by_id[node_b_id]
+    
+    # Generate the prompt text
+    if callable(comparison_prompt_template):
+        # Use custom prompt generator - it receives the full option dictionaries
+        prompt_text = comparison_prompt_template(node_a, node_b, 'original')
+    else:
+        # Use template-based generation
+        option_a_text = node_a['description']
+        option_b_text = node_b['description']
+        
+        prompt_text = comparison_prompt_template.format(
+            option_A=option_a_text,
+            option_B=option_b_text
+        )
+    
+    # Create full example with system message
+    full_example = f"System Message:\n{system_message}\n\n{'='*60}\n\n{prompt_text}"
+    
+    # Save to file
+    example_path = os.path.join(save_path, "example_prompt.txt")
+    with open(example_path, 'w') as f:
+        f.write(full_example)
+        f.write(f"\n\n{'='*60}\n")
+        f.write(f"Option A ID: {node_a_id}\n")
+        f.write(f"Option B ID: {node_b_id}\n")
+
+
 async def compute_utilities(
     options_list: List[Dict[str, str]],
     model_key: Optional[str] = None,
@@ -377,7 +432,8 @@ async def compute_utilities(
     with_reasoning: Optional[bool] = None,
     save_dir: str = "results",
     save_suffix: Optional[str] = None,
-    unique_fields: Optional[List[str]] = None
+    unique_fields: Optional[List[str]] = None,
+    edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None
 ) -> Dict[str, Any]:
     """
     Compute utilities for a set of options using a specified utility model.
@@ -398,6 +454,8 @@ async def compute_utilities(
         unique_fields: Optional list of field names. If specified, edges will be excluded where both options
                 have the same values for all specified fields. For example, if unique_fields=['patient_data'],
                 then edges between options with the same patient_data will be excluded.
+        edge_filter: Optional function returning True to keep edge, False to exclude.
+                Called with (option_a, option_b) dictionaries.
         
     Returns:
         Dictionary containing results data
@@ -492,6 +550,34 @@ async def compute_utilities(
         seed=preference_graph_arguments.get('holdout_seed', 42),
         unique_fields=unique_fields_param
     )
+    
+    # Apply custom edge filter if provided
+    if edge_filter:
+        options_by_id = {opt['id']: opt for opt in options}
+        filtered_edges = set()
+        
+        for (id_a, id_b) in graph.training_edges_pool:
+            opt_a = options_by_id[id_a]
+            opt_b = options_by_id[id_b]
+            
+            # Keep edge if filter returns True
+            if edge_filter(opt_a, opt_b):
+                filtered_edges.add((id_a, id_b))
+        
+        original_count = len(graph.training_edges_pool)
+        graph.training_edges_pool = filtered_edges
+        filtered_count = original_count - len(graph.training_edges_pool)
+        if filtered_count > 0:
+            print(f"Custom edge filter removed {filtered_count} edges")
+    
+    # Save example prompt from a random edge (if save_dir is provided)
+    if save_dir:
+        _save_example_prompt(
+            graph=graph, 
+            comparison_prompt_template=comparison_prompt_template,
+            system_message=compute_utilities_arguments['system_message'],
+            save_path=save_dir
+        )
     
     # Fit the model (this will populate training edges)
     utilities, metrics = await utility_model.fit(graph, agent)
