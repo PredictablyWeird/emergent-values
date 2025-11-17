@@ -15,7 +15,7 @@ import yaml
 import argparse
 from pathlib import Path
 
-from choices import Experiment, ExperimentConfig, PromptConfig
+from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical
 
 
 # ============= Configuration =============
@@ -165,18 +165,42 @@ def format_patient_data(patient: dict) -> str:
     return "\n".join(lines)
 
 
-def format_option_with_factors(option_dict: dict) -> str:
+def format_option_with_factors(option_dict: dict, patient_data_map: dict = None) -> str:
     """
     Format patient data including factor information if present.
     This matches format_option_with_factors from run_triage_experiment.py.
     
     Args:
-        option_dict: Variables dictionary with 'patient' and optionally 'factor_value'
+        option_dict: Variables dictionary with severity/group/sofa and optionally 'factor_value'
+        patient_data_map: Optional mapping from (severity, group, sofa) -> patient dict
     
     Returns:
         Formatted string for patient data section including factors
     """
-    patient = option_dict['patient']
+    # Try to get patient from option_dict first (if it was added)
+    if 'patient' in option_dict:
+        patient = option_dict['patient']
+    elif patient_data_map is not None:
+        # Look up patient from variable values
+        key = (option_dict.get('severity'), option_dict.get('group'), option_dict.get('sofa'))
+        patient = patient_data_map.get(key)
+        if patient is None:
+            # Fallback: create minimal patient dict from variables
+            patient = {
+                'severity': option_dict.get('severity'),
+                'group': option_dict.get('group'),
+                'sofa': option_dict.get('sofa'),
+                'patient_id': option_dict.get('patient_id', 'Unknown')
+            }
+    else:
+        # Fallback: create minimal patient dict from variables
+        patient = {
+            'severity': option_dict.get('severity'),
+            'group': option_dict.get('group'),
+            'sofa': option_dict.get('sofa'),
+            'patient_id': option_dict.get('patient_id', 'Unknown')
+        }
+    
     patient_formatted = format_patient_data(patient)
     
     # Add factor information if present and if we have factor_name in metadata
@@ -188,13 +212,14 @@ def format_option_with_factors(option_dict: dict) -> str:
     return patient_formatted
 
 
-def create_icu_triage_prompt_generator(return_json: bool = True):
+def create_icu_triage_prompt_generator(return_json: bool = True, patient_data_map: dict = None):
     """
     Create a prompt generator function for ICU triage decisions.
     This matches the icu_triage_prompt_generator from run_triage_experiment.py.
     
     Args:
         return_json: Whether to request JSON format responses
+        patient_data_map: Optional mapping from (severity, group, sofa) -> patient dict
     
     Returns:
         Function that generates prompts given two options and direction
@@ -215,8 +240,8 @@ def create_icu_triage_prompt_generator(return_json: bool = True):
             option_A_dict, option_B_dict = option_B_dict, option_A_dict
         
         # Format patient data including factors
-        patient_A_formatted = format_option_with_factors(option_A_dict)
-        patient_B_formatted = format_option_with_factors(option_B_dict)
+        patient_A_formatted = format_option_with_factors(option_A_dict, patient_data_map)
+        patient_B_formatted = format_option_with_factors(option_B_dict, patient_data_map)
 
         if return_json:
             response_format = """## Response format
@@ -286,19 +311,42 @@ async def run_triage_experiment(
         # Set the factor name for format_option_with_factors to use
         format_option_with_factors.factor_name = factor_info['name']
     
-    # Create variables
+    # Extract fields from patients to create proper variables
+    # Fields to extract from patient_data for analysis
+    severity_values = sorted(set(p.get('severity') for p in patients if 'severity' in p))
+    group_values = sorted(set(p.get('group') for p in patients if 'group' in p))
+    sofa_values = sorted(set(p.get('sofa') for p in patients if 'sofa' in p))
+    
+    # Create mapping from (severity, group, sofa) -> patient data
+    # This allows us to look up full patient data from variable values
+    patient_data_map = {}
+    patient_id_map = {}
+    for patient in patients:
+        key = (patient.get('severity'), patient.get('group'), patient.get('sofa'))
+        if all(k is not None for k in key):
+            patient_data_map[key] = patient
+            patient_id_map[key] = patient.get('patient_id', 'Unknown')
+    
+    # Create variables using Variable objects
+    variables = {}
+    
+    # Add patient data fields as variables
+    if severity_values:
+        variables['severity'] = numerical('severity', severity_values, 
+                                          description='Patient severity level')
+    if group_values:
+        variables['group'] = categorical('group', group_values,
+                                        description='Patient group')
+    if sofa_values:
+        variables['sofa'] = numerical('sofa', sofa_values,
+                                     description='SOFA score')
+    
+    # Add factor if specified
     if factor_info:
-        # Combine patients with factor values
-        variables = {
-            'patient': patients,
-            'factor_value': factor_info['values']
-        }
+        variables['factor_value'] = categorical('factor_value', factor_info['values'],
+                                                 description=f'{factor_info["name"]} factor')
         experiment_name = f"triage_{patient_type}_{factor_info['id']}"
     else:
-        # Just patients, no factor
-        variables = {
-            'patient': patients
-        }
         experiment_name = f"triage_{patient_type}_no_factor"
     
     # Create experiment config
@@ -336,30 +384,46 @@ async def run_triage_experiment(
         with_reasoning=False
     )
     
-    # Create custom prompt generator
-    prompt_generator = create_icu_triage_prompt_generator(return_json=return_json)
+    # Create custom prompt generator (pass patient_data_map so it can look up full patient data)
+    prompt_generator = create_icu_triage_prompt_generator(return_json=return_json, patient_data_map=patient_data_map)
     
     # Create option text function for descriptions (used in summaries/results)
-    def option_text_fn(variables: dict) -> str:
+    def option_text_fn(variables_dict: dict) -> str:
         """Generate a readable description for the option."""
-        patient = variables['patient']
-        patient_id = patient.get('patient_id', 'Unknown')
+        # Look up patient_id from variable values
+        key = (variables_dict.get('severity'), variables_dict.get('group'), variables_dict.get('sofa'))
+        patient_id = patient_id_map.get(key, 'Unknown')
         
         if factor_info:
-            factor_value = variables.get('factor_value', 'Unknown')
+            factor_value = variables_dict.get('factor_value', 'Unknown')
             return f"Patient {patient_id} ({factor_info['name']}: {factor_value})"
         else:
             return f"Patient {patient_id}"
     
+    # Create a custom Experiment class that adds patient_id and full patient data to options
+    class TriageExperiment(Experiment):
+        def _generate_options(self):
+            """Override to add patient_id and full patient data to each option."""
+            options = super()._generate_options()
+            # Add patient_id and full patient data to each option based on variable values
+            for opt in options:
+                key = (opt.get('severity'), opt.get('group'), opt.get('sofa'))
+                if all(k is not None for k in key):
+                    opt['patient_id'] = patient_id_map.get(key, 'Unknown')
+                    # Add full patient data so format_option_with_factors can use it
+                    if key in patient_data_map:
+                        opt['patient'] = patient_data_map[key]
+            return options
+    
     # Create experiment
-    experiment = Experiment(
+    experiment = TriageExperiment(
         name=experiment_name,
         variables=variables,
         prompt_config=prompt_config,
         experiment_config=experiment_config,
         option_text_fn=option_text_fn,  # For readable descriptions
         custom_prompt_generator=prompt_generator,  # For actual prompts
-        unique_fields=['patient']  # Don't compare same patient with different factors
+        unique_fields=['patient_id']  # Don't compare same patient with different factors
     )
     
     # Run it

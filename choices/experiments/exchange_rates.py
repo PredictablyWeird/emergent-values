@@ -16,7 +16,7 @@ import yaml
 import argparse
 from pathlib import Path
 
-from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical
+from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical, log_numerical
 
 
 # ============= Configuration Loading =============
@@ -171,7 +171,7 @@ def create_experiment_from_yaml_config(
     # Create variables (only the selected factor + N)
     variables = {
         factor_name: ALL_FACTORS[factor_name],
-        'N': numerical('N', N_VALUES[n_values_key])
+        'N': log_numerical('N', N_VALUES[n_values_key])  # Use log_numerical for diminishing returns
     }
     
     # Create prompt config

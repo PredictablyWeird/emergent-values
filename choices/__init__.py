@@ -18,6 +18,7 @@ from .variable import (
     VariableType,
     categorical,
     numerical,
+    log_numerical,
     ordinal,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     'VariableType',
     'categorical',
     'numerical',
+    'log_numerical',
     'ordinal',
     'ExperimentResults',
     'PreferenceGraphResults',

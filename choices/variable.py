@@ -12,7 +12,8 @@ from enum import Enum
 class VariableType(Enum):
     """Type of variable."""
     CATEGORICAL = "categorical"  # Discrete categories (gender, country, etc.)
-    NUMERICAL = "numerical"      # Numeric values (N, age, etc.)
+    NUMERICAL = "numerical"      # Numeric values (N, age, etc.) - simple difference
+    LOG_NUMERICAL = "log_numerical"  # Numeric values with log transform (for diminishing returns)
     ORDINAL = "ordinal"          # Ordered categories (age groups, etc.)
 
 
@@ -65,6 +66,11 @@ def categorical(name: str, values: List[Any], description: str = "") -> Variable
 def numerical(name: str, values: List[float], description: str = "") -> Variable:
     """Helper to create a numerical variable."""
     return Variable(name=name, values=values, type=VariableType.NUMERICAL, description=description)
+
+
+def log_numerical(name: str, values: List[float], description: str = "") -> Variable:
+    """Helper to create a log-numerical variable (for diminishing returns analysis)."""
+    return Variable(name=name, values=values, type=VariableType.LOG_NUMERICAL, description=description)
 
 
 def ordinal(name: str, values: List[Any], description: str = "") -> Variable:
