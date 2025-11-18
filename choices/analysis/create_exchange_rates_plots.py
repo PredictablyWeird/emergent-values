@@ -27,11 +27,13 @@ import statsmodels.api as sm
 import seaborn as sns
 from pathlib import Path
 from glob import glob
+from typing import Tuple
 
 from matplotlib.colors import LogNorm
 from matplotlib.ticker import LogFormatterSciNotation, FuncFormatter, ScalarFormatter
 
 from choices.results import ExperimentResults
+from choices.variable import VariableType
 
 
 ###############################################################################
@@ -388,17 +390,95 @@ def find_result_files(results_dir: str):
     return str(graph_files[0]), str(model_files[0])
 
 
-def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: str = "N") -> pd.DataFrame:
+def infer_numerical_variable(results: ExperimentResults, provided_var: str = None) -> str:
+    """
+    Infer the numerical variable name from results.
+    
+    Prefers LOG_NUMERICAL over NUMERICAL if both exist.
+    Falls back to provided_var if it exists in results.
+    
+    Args:
+        results: ExperimentResults object
+        provided_var: Optional variable name provided by user
+    
+    Returns:
+        Name of the numerical variable to use
+    """
+    # Get all numerical variables (both NUMERICAL and LOG_NUMERICAL)
+    all_numerical = {}
+    for name, var in results.graph.variables.items():
+        if var.type in (VariableType.NUMERICAL, VariableType.LOG_NUMERICAL):
+            all_numerical[name] = var
+    
+    if not all_numerical:
+        raise ValueError(
+            "No numerical variables found in results. "
+            "Exchange rate plots require at least one numerical variable."
+        )
+    
+    # If user provided a variable, validate it exists
+    if provided_var:
+        if provided_var not in all_numerical:
+            available = list(all_numerical.keys())
+            raise ValueError(
+                f"Numerical variable '{provided_var}' not found in results. "
+                f"Available numerical variables: {available}"
+            )
+        return provided_var
+    
+    # Auto-detect: prefer LOG_NUMERICAL over NUMERICAL
+    log_numerical_vars = {
+        name: var for name, var in all_numerical.items()
+        if var.type == VariableType.LOG_NUMERICAL
+    }
+    
+    if log_numerical_vars:
+        # Use first LOG_NUMERICAL variable found
+        return list(log_numerical_vars.keys())[0]
+    else:
+        # Fall back to first NUMERICAL variable
+        return list(all_numerical.keys())[0]
+
+
+def validate_factor(results: ExperimentResults, factor_name: str) -> None:
+    """
+    Validate that the factor exists in results and is categorical.
+    
+    Args:
+        results: ExperimentResults object
+        factor_name: Name of the factor to validate
+    
+    Raises:
+        ValueError if factor doesn't exist or isn't categorical
+    """
+    if factor_name not in results.graph.variables:
+        categorical_vars = list(results.graph.get_categorical_variables().keys())
+        raise ValueError(
+            f"Factor '{factor_name}' not found in results. "
+            f"Available categorical variables: {categorical_vars}"
+        )
+    
+    var = results.graph.variables[factor_name]
+    if var.type != VariableType.CATEGORICAL:
+        raise ValueError(
+            f"Factor '{factor_name}' is not categorical (type: {var.type.value}). "
+            "Exchange rate plots require a categorical factor."
+        )
+
+
+def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: str = None) -> Tuple[pd.DataFrame, str]:
     """
     Load exchange rates experiment results and prepare DataFrame for plotting.
     
     Args:
         results_dir: Directory containing preference_graph and utility_model JSON files
         factor_name: Name of the categorical factor (e.g., "gender", "ethnicity")
-        numerical_var: Name of the numerical variable (default: "N")
+        numerical_var: Name of the numerical variable (default: auto-detected from results)
     
     Returns:
-        DataFrame with columns: option_id, description, utility_mean, utility_variance, N, X, lnN
+        Tuple of (DataFrame, numerical_var_name) where:
+        - DataFrame has columns: option_id, description, utility_mean, utility_variance, {numerical_var}, X, lnN
+        - numerical_var_name is the name of the numerical variable used (may be auto-detected)
     """
     # Find result files
     graph_file, model_file = find_result_files(results_dir)
@@ -422,6 +502,13 @@ def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: 
     
     # Load results using the new API
     results = ExperimentResults.load(results_dir, graph_suffix)
+    
+    # Validate and infer variables
+    validate_factor(results, factor_name)
+    numerical_var = infer_numerical_variable(results, numerical_var)
+    
+    print(f"Using numerical variable: {numerical_var}")
+    print(f"Using categorical factor: {factor_name}")
     
     # Build DataFrame from options and utilities
     rows = []
@@ -461,7 +548,7 @@ def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: 
     df = df[df[numerical_var] > 0]
     df["lnN"] = np.log(df[numerical_var])
     
-    return df
+    return df, numerical_var
 
 
 def get_factor_values_and_N_values(df: pd.DataFrame, numerical_var: str = "N") -> tuple:
@@ -500,30 +587,25 @@ def plot_appendix_multi_model_average(
     MSE_threshold=None,
     aggregator_plot_title=None,
     aggregator_plot_y_label=None,
-    aggregator_mse_plot_title=None,
-    arrow_top_label="More Valued",
-    arrow_bottom_label="Less Valued",
-    arrow_top_xy=(0.05, 0.95),
-    arrow_bottom_xy=(0.05, 0.05),
-    arrow_label_rotation=90,
-    arrowprops_top=None,
-    arrowprops_bottom=None,
     x_name_mapping=None,
-    value_interpretation=None
+    numerical_var="N",
 ):
     """
     Simplified version of plot_appendix_multi_model_average for single model.
     
     Creates exchange rate plots from a DataFrame with utility data.
+    
+    Args:
+        numerical_var: Name of the numerical variable (default: "N")
     """
     
-    def make_log10_regression_figure(df, slopes, intercepts, model_key="", category="", measure=""):
+    def make_log10_regression_figure(df, slopes, intercepts, model_key="", category="", measure="", numerical_var="N"):
         measure_title = MEASURE_TITLES.get(measure, measure)
         df = df[df["X"].isin(slopes.keys())].copy()
         if df.empty:
             return None
 
-        df["log10N"] = np.log10(df["N"])
+        df["log10N"] = np.log10(df[numerical_var])
 
         X_list_local = sorted(df["X"].unique())
         if not X_list_local:
@@ -760,7 +842,8 @@ def plot_appendix_multi_model_average(
             df, slopes, intercepts,
             model_key=model_name,
             category="",
-            measure=measure
+            measure=measure,
+            numerical_var=numerical_var
         )
         if fig_reg:
             figures_dict[f"{model_name}_aux_lnN_reg"] = fig_reg
@@ -771,11 +854,10 @@ def plot_appendix_multi_model_average(
 def create_exchange_rates_plots(
     results_dir: str,
     factor_name: str,
-    numerical_var: str = "N",
+    numerical_var: str = None,
     canonical_X: str = None,
     include_Xs: list = None,
     plot_scale: str = 'log',
-    value_interpretation: str = None,
     output_dir: str = None,
     plot_title: str = None,
     model_name: str = None
@@ -786,11 +868,10 @@ def create_exchange_rates_plots(
     Args:
         results_dir: Directory containing result files
         factor_name: Name of the categorical factor variable
-        numerical_var: Name of the numerical variable (default: "N")
+        numerical_var: Name of the numerical variable (default: auto-detected from results)
         canonical_X: Reference X value for ratios (default: first X)
         include_Xs: List of X values to include (default: all)
         plot_scale: 'log' or 'linear'
-        value_interpretation: 'positive' or 'negative'
         output_dir: Directory to save plots (default: same as results_dir)
         plot_title: Custom plot title
         model_name: Model name (default: extracted from directory)
@@ -798,8 +879,8 @@ def create_exchange_rates_plots(
     Returns:
         Dictionary of figures
     """
-    # Load data
-    df = load_exchange_rates_data(results_dir, factor_name, numerical_var)
+    # Load data (this will auto-detect numerical_var if not provided)
+    df, numerical_var = load_exchange_rates_data(results_dir, factor_name, numerical_var)
     
     if len(df) == 0:
         raise ValueError(f"No data found with factor '{factor_name}' and numerical variable '{numerical_var}'")
@@ -849,8 +930,8 @@ def create_exchange_rates_plots(
         plot_scale=plot_scale,
         aggregator_plot_title=plot_title,
         aggregator_plot_y_label="Exchange Rate",
-        value_interpretation=value_interpretation,
-        plot_auxiliary_figures=True
+        plot_auxiliary_figures=True,
+        numerical_var=numerical_var
     )
     
     if not figures_dict or 'aggregator_figure' not in figures_dict:
@@ -898,8 +979,7 @@ Example usage:
       --results_dir results/exchange_rates_ethnicity/gpt-4o-mini/20251117_120000 \\
       --factor ethnicity \\
       --canonical_x White \\
-      --include_xs White Black Hispanic \\
-      --value_interpretation positive
+      --include_xs White Black Hispanic
         """
     )
     
@@ -915,8 +995,8 @@ Example usage:
     )
     parser.add_argument(
         '--numerical_var',
-        default='N',
-        help='Name of the numerical variable (default: N)'
+        default=None,
+        help='Name of the numerical variable (default: auto-detected from results, prefers LOG_NUMERICAL over NUMERICAL)'
     )
     parser.add_argument(
         '--canonical_x',
@@ -934,12 +1014,6 @@ Example usage:
         default='log',
         choices=['log', 'linear'],
         help='Plot scale (default: log)'
-    )
-    parser.add_argument(
-        '--value_interpretation',
-        default=None,
-        choices=['positive', 'negative'],
-        help='Value interpretation: positive (higher rates = more valued), negative (higher rates = less valued)'
     )
     parser.add_argument(
         '--output_dir',
@@ -966,7 +1040,6 @@ Example usage:
         canonical_X=args.canonical_x,
         include_Xs=args.include_xs,
         plot_scale=args.plot_scale,
-        value_interpretation=args.value_interpretation,
         output_dir=args.output_dir,
         plot_title=args.plot_title,
         model_name=args.model_name
