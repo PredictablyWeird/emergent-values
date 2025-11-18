@@ -39,6 +39,8 @@ ALL_FACTORS = {
                             description='Ethnicity of residents'),
     'gender': categorical('gender', ['male', 'female', 'transgender', 'non_transgender'],
                             description='Gender of residents'),
+    'nationality': categorical('nationality', ['German', 'Japanese', 'Nigerian'],
+                                description='Nationality of residents'),
 }
 VARIABLES = {
     'population': log_numerical('population', [10, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 5000, 10000],
@@ -120,6 +122,10 @@ def format_zone_data(zone_dict: dict) -> str:
     if 'ethnicity' in zone_dict:
         ethnicity = zone_dict['ethnicity']
         lines.append(f"* Ethnicity: Predominantly {ethnicity} residents")
+
+    if 'nationality' in zone_dict:
+        nationality = zone_dict['nationality']
+        lines.append(f"* Nationality: Predominantly {nationality} residents")
 
     if 'gender' in zone_dict:
         gender = zone_dict['gender']
