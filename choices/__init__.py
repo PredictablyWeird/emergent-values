@@ -14,11 +14,8 @@ from .experiment import (
 
 from .variable import (
     Variable,
-    VariableType,
-    categorical,
-    numerical,
-    log_numerical,
-    ordinal,
+    AnalysisConfig,
+    AnalysisType,
 )
 
 from .results import (
@@ -33,11 +30,8 @@ __all__ = [
     'ExperimentConfig',
     'PromptConfig',
     'Variable',
-    'VariableType',
-    'categorical',
-    'numerical',
-    'log_numerical',
-    'ordinal',
+    'AnalysisConfig',
+    'AnalysisType',
     'ExperimentResults',
     'PreferenceGraphResults',
     'UtilityModelResults',

@@ -8,6 +8,7 @@ import yaml
 import numpy as np
 import random
 from typing import List, Dict, Any, Optional, Union, Callable
+from pathlib import Path
 from .llm_agent import LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
 import re
 from tqdm import tqdm
@@ -18,6 +19,45 @@ load_dotenv()
 
 
 # ========================== GENERAL HELPER FUNCTIONS ========================== #
+
+def find_result_files(results_dir: str):
+    """
+    Find preference_graph and utility_model JSON files in the directory.
+    Validates that the suffixes match between graph and model files.
+    
+    Returns:
+        (graph_path, model_path, suffix) tuple of Path objects and suffix string
+        Returns (None, None, None) if files not found
+        Raises ValueError if suffixes don't match
+    """
+    results_path = Path(results_dir)
+    
+    # Find preference_graph_*.json
+    graph_files = list(results_path.glob("preference_graph_*.json"))
+    if not graph_files:
+        return None, None, None
+    
+    # Find utility_model_*.json
+    model_files = list(results_path.glob("utility_model_*.json"))
+    if not model_files:
+        return None, None, None
+    
+    # Use the first file of each type (assuming only one)
+    graph_path = graph_files[0]
+    model_path = model_files[0]
+    
+    # Extract suffixes from filenames
+    graph_suffix = graph_path.stem.replace("preference_graph_", "")
+    model_suffix = model_path.stem.replace("utility_model_", "")
+    
+    # Validate that suffixes match
+    if graph_suffix != model_suffix:
+        raise ValueError(
+            f"Suffix mismatch: graph has '{graph_suffix}', model has '{model_suffix}'"
+        )
+    
+    return graph_path, model_path, graph_suffix
+
 
 def convert_numpy(obj):
     """

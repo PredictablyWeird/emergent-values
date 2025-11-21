@@ -5,14 +5,14 @@ Simple example showing how to use the choices framework.
 
 import asyncio
 
-from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical
+from choices import Experiment, ExperimentConfig, PromptConfig, Variable
 
 
 # ============= Experiment Setup =============
 
 # Define variables
 VARIABLES = [
-    categorical(
+    Variable(
         name='text', 
         values=[
             'You receive $50.', 

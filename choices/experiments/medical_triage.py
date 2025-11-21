@@ -13,9 +13,8 @@ Usage:
 import asyncio
 import yaml
 import argparse
-from pathlib import Path
 
-from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical
+from choices import AnalysisConfig, AnalysisType, Experiment, ExperimentConfig, PromptConfig, Variable
 
 
 # ============= Configuration =============
@@ -162,43 +161,18 @@ def format_patient_data(patient: dict) -> str:
     return "\n".join(lines)
 
 
-def format_option_with_factors(option_dict: dict, patient_data_map: dict = None) -> str:
+def format_option_with_factors(option_dict: dict) -> str:
     """
     Format patient data including factor information if present.
     This matches format_option_with_factors from run_triage_experiment.py.
     
     Args:
-        option_dict: Variables dictionary with severity/group/sofa and optionally 'factor_value'
-        patient_data_map: Optional mapping from (severity, group, sofa) -> patient dict
+        option_dict: Option dictionary with 'patient' and optionally 'factor_value'
     
     Returns:
         Formatted string for patient data section including factors
     """
-    # Try to get patient from option_dict first (if it was added)
-    if 'patient' in option_dict:
-        patient = option_dict['patient']
-    elif patient_data_map is not None:
-        # Look up patient from variable values
-        key = (option_dict.get('severity'), option_dict.get('group'), option_dict.get('sofa'))
-        patient = patient_data_map.get(key)
-        if patient is None:
-            # Fallback: create minimal patient dict from variables
-            patient = {
-                'severity': option_dict.get('severity'),
-                'group': option_dict.get('group'),
-                'sofa': option_dict.get('sofa'),
-                'patient_id': option_dict.get('patient_id', 'Unknown')
-            }
-    else:
-        # Fallback: create minimal patient dict from variables
-        patient = {
-            'severity': option_dict.get('severity'),
-            'group': option_dict.get('group'),
-            'sofa': option_dict.get('sofa'),
-            'patient_id': option_dict.get('patient_id', 'Unknown')
-        }
-    
-    patient_formatted = format_patient_data(patient)
+    patient_formatted = format_patient_data(option_dict)
     
     # Add factor information if present and if we have factor_name in metadata
     if 'factor_value' in option_dict and hasattr(format_option_with_factors, 'factor_name'):
@@ -303,17 +277,33 @@ async def run_triage_experiment(
         format_option_with_factors.factor_name = factor_info['name']
     
     variables = [
-        categorical('patient_id', [p.get('patient_id') for p in patients],
-            description='Patient ID'),
+        Variable(
+            name='patient_id',
+            values=[p.get('patient_id') for p in patients],
+            description='Patient ID'
+        ),
     ]
 
     # Add factor if specified
     if factor_info:
-        variables.append(categorical('factor_value', factor_info['values'],
-                                                 description=f'{factor_info["name"]} factor'))
+        variables.append(Variable(
+            name='factor_value',
+            values=factor_info['values'],
+            description=f'{factor_info["name"]} factor'
+        ))
         experiment_name = f"triage_{patient_type}_{factor_info['id']}"
     else:
         experiment_name = f"triage_{patient_type}_no_factor"
+
+    analysis_fields = {
+        "sofa": AnalysisType.NUMERICAL,
+        "severity": AnalysisType.NUMERICAL,
+    }
+    if factor_info:
+        analysis_fields["factor_value"] = AnalysisType.CATEGORICAL
+    analysis_config = AnalysisConfig(
+        fields=analysis_fields
+    )
     
     # Create experiment config
     experiment_config = ExperimentConfig(
@@ -352,7 +342,8 @@ async def run_triage_experiment(
             options = super()._generate_options()
             # Add patient_id and full patient data to each option based on variable values
             for opt in options:
-                opt['patient'] = next(p for p in patients if p.get('patient_id') == opt['patient_id'])
+                patient_data = next(p for p in patients if p.get('patient_id') == opt['patient_id'])
+                opt.update(patient_data)
             return options
     
     # Create experiment
@@ -362,7 +353,8 @@ async def run_triage_experiment(
         prompt_config=prompt_config,
         experiment_config=experiment_config,
         option_label_generator=option_label_generator,  # For readable descriptions
-        edge_filter=lambda opt_a, opt_b: opt_a.get('patient_id') != opt_b.get('patient_id')   # Don't compare same patient with different factors
+        edge_filter=lambda opt_a, opt_b: opt_a.get('patient_id') != opt_b.get('patient_id'),   # Don't compare same patient with different factors
+        analysis_config=analysis_config,
     )
     
     # Run it

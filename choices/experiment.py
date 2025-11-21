@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Callable, Union
 from datetime import datetime
 
 from .utilities import compute_utilities
-from .variable import Variable
+from .variable import Variable, AnalysisConfig
 
 
 @dataclass
@@ -104,6 +104,7 @@ class Experiment:
         variables: List[Variable],
         prompt_config: PromptConfig,
         experiment_config: ExperimentConfig,
+        analysis_config: Optional[AnalysisConfig] = None,
         edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
         option_label_generator: Optional[Callable[[Dict[str, Any]], str]] = None,
         run_id: Optional[str] = None,
@@ -116,6 +117,8 @@ class Experiment:
             variables: List of Variable objects describing the variables to vary
             prompt_config: Configuration for prompt generation
             experiment_config: Configuration for running the experiment
+            analysis_config: Optional configuration for analyzing results. Defines which fields
+                           to analyze and their analysis types (categorical, numerical, log_numerical).
             edge_filter: Optional function returning True to keep edge, False to exclude.
                     Called with (option_a, option_b) dictionaries.
             option_label_generator: Optional function that takes an option dictionary and returns a label string
@@ -129,6 +132,7 @@ class Experiment:
         
         self.prompt_config = prompt_config
         self.experiment_config = experiment_config
+        self.analysis_config = analysis_config or AnalysisConfig()
         self.edge_filter = edge_filter
         self.option_label_generator = option_label_generator
         self.run_id = run_id or self._generate_run_id()
@@ -216,7 +220,7 @@ class Experiment:
         if verbose:
             print(f"Generated {len(options)} options from variables:")
             for var in self.variables:
-                print(f"  {var.name} ({var.type.value}): {len(var.values)} values")
+                print(f"  {var.name}: {len(var.values)} values")
             print(f"\nExample options:")
             for opt in options[:3]:
                 print(f"  - {opt['label']}")
@@ -252,6 +256,7 @@ class Experiment:
             comparison_prompt_generator=self.prompt_config.generate_prompt,
             edge_filter=self.edge_filter,
             variables=self.variables,  # Pass variables for metadata
+            analysis_config=self.analysis_config,  # Pass analysis config
         )
         
         if verbose:

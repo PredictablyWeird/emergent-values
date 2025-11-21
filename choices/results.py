@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 import json
 from pathlib import Path
 
-from .variable import Variable, VariableType
+from .variable import Variable, AnalysisConfig
 
 
 @dataclass
@@ -75,6 +75,7 @@ class PreferenceGraphResults:
     training_edges: List[List[Any]]
     holdout_edges: Optional[List[List[Any]]] = None
     variables: List[Variable] = field(default_factory=list)
+    analysis_config: AnalysisConfig = field(default_factory=AnalysisConfig)
     config: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -85,6 +86,7 @@ class PreferenceGraphResults:
             "training_edges": self.training_edges,
             "holdout_edges": self.holdout_edges,
             "variables": [var.to_dict() for var in self.variables],
+            "analysis_config": self.analysis_config.to_dict(),
             **self.config
         }
     
@@ -99,13 +101,18 @@ class PreferenceGraphResults:
                 Variable(
                     name=var_data["name"],
                     values=var_data["values"],
-                    type=VariableType(var_data["type"]),
                     description=var_data.get("description", "")
                 )
                 for var_data in data["variables"]
             ]
         else:
             variables = []
+        
+        # Extract analysis config
+        if "analysis_config" in data:
+            analysis_config = AnalysisConfig.from_dict(data["analysis_config"])
+        else:
+            analysis_config = AnalysisConfig()
         
         # Extract config fields
         config_keys = ["compute_utilities_config", "create_agent_config", 
@@ -118,6 +125,7 @@ class PreferenceGraphResults:
             training_edges=data.get("training_edges", []),
             holdout_edges=data.get("holdout_edges"),
             variables=variables,
+            analysis_config=analysis_config,
             config=config
         )
     
@@ -128,19 +136,25 @@ class PreferenceGraphResults:
                 return var
         return None
     
-    def get_categorical_variables(self) -> List[Variable]:
+    def get_categorical_variables(self) -> Dict[str, Variable]:
         """Get all categorical variables (useful for finding factors)."""
-        return {
-            var.name: var for var in self.variables
-            if var.type == VariableType.CATEGORICAL
-        }
+        from .variable import AnalysisType
+        categorical_vars = {}
+        for var in self.variables:
+            atype = self.analysis_config.get_analysis_type(var.name)
+            if atype == AnalysisType.CATEGORICAL:
+                categorical_vars[var.name] = var
+        return categorical_vars
     
     def get_numerical_variables(self) -> Dict[str, Variable]:
         """Get all numerical variables (useful for finding N, age, etc.)."""
-        return {
-            var.name: var for var in self.variables
-            if var.type == VariableType.NUMERICAL
-        }
+        from .variable import AnalysisType
+        numerical_vars = {}
+        for var in self.variables:
+            atype = self.analysis_config.get_analysis_type(var.name)
+            if atype in (AnalysisType.NUMERICAL, AnalysisType.LOG_NUMERICAL):
+                numerical_vars[var.name] = var
+        return numerical_vars
     
     def save(self, save_dir: str, filename: str = "preference_graph.json") -> None:
         """Save preference graph data."""

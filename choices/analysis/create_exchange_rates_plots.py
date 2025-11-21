@@ -22,7 +22,8 @@ from matplotlib.colors import LogNorm
 from matplotlib.ticker import LogFormatterSciNotation, FuncFormatter, ScalarFormatter
 
 from choices.results import ExperimentResults
-from choices.variable import VariableType
+from choices.variable import AnalysisType
+from choices.utils import find_result_files
 
 
 ###############################################################################
@@ -356,29 +357,6 @@ def geometric_mean(values):
     return math.exp(sum(logs)/len(logs))
 
 
-def find_result_files(results_dir: str):
-    """
-    Find preference_graph and utility_model JSON files in the directory.
-    
-    Returns:
-        (graph_file, model_file) tuple or (None, None) if not found
-    """
-    results_path = Path(results_dir)
-    
-    # Find preference_graph_*.json
-    graph_files = list(results_path.glob("preference_graph_*.json"))
-    if not graph_files:
-        return None, None
-    
-    # Find utility_model_*.json
-    model_files = list(results_path.glob("utility_model_*.json"))
-    if not model_files:
-        return None, None
-    
-    # Use the first file of each type (assuming only one)
-    return str(graph_files[0]), str(model_files[0])
-
-
 def infer_numerical_variable(results: ExperimentResults, provided_var: str = None) -> str:
     """
     Infer the numerical variable name from results.
@@ -395,10 +373,14 @@ def infer_numerical_variable(results: ExperimentResults, provided_var: str = Non
     """
     # Get all numerical variables (both NUMERICAL and LOG_NUMERICAL)
     all_numerical = {}
-    # variables is a List[Variable], so iterate over it
-    for var in results.graph.variables:
-        if var.type in (VariableType.NUMERICAL, VariableType.LOG_NUMERICAL):
-            all_numerical[var.name] = var
+    # Check analysis config for numerical fields
+    for field_name, analysis_type in results.graph.analysis_config.fields.items():
+        if analysis_type in (AnalysisType.NUMERICAL, AnalysisType.LOG_NUMERICAL):
+            # Find corresponding variable
+            for var in results.graph.variables:
+                if var.name == field_name:
+                    all_numerical[field_name] = var
+                    break
     
     if not all_numerical:
         raise ValueError(
@@ -417,10 +399,11 @@ def infer_numerical_variable(results: ExperimentResults, provided_var: str = Non
         return provided_var
     
     # Auto-detect: prefer LOG_NUMERICAL over NUMERICAL
-    log_numerical_vars = {
-        name: var for name, var in all_numerical.items()
-        if var.type == VariableType.LOG_NUMERICAL
-    }
+    log_numerical_vars = {}
+    for name, var in all_numerical.items():
+        atype = results.graph.analysis_config.get_analysis_type(name)
+        if atype == AnalysisType.LOG_NUMERICAL:
+            log_numerical_vars[name] = var
     
     if log_numerical_vars:
         # Use first LOG_NUMERICAL variable found
@@ -441,23 +424,19 @@ def validate_factor(results: ExperimentResults, factor_name: str) -> None:
     Raises:
         ValueError if factor doesn't exist or isn't categorical
     """
-    # Look up the variable by name (variables is a List[Variable])
-    var = None
-    for v in results.graph.variables:
-        if v.name == factor_name:
-            var = v
-            break
+    # Check if factor is in analysis config and is categorical
+    atype = results.graph.analysis_config.get_analysis_type(factor_name)
     
-    if var is None:
+    if atype is None:
         categorical_vars = list(results.graph.get_categorical_variables().keys())
         raise ValueError(
-            f"Factor '{factor_name}' not found in results. "
+            f"Factor '{factor_name}' not found in analysis config. "
             f"Available categorical variables: {categorical_vars}"
         )
     
-    if var.type != VariableType.CATEGORICAL:
+    if atype != AnalysisType.CATEGORICAL:
         raise ValueError(
-            f"Factor '{factor_name}' is not categorical (type: {var.type.value}). "
+            f"Factor '{factor_name}' is not categorical (type: {atype.value}). "
             "Exchange rate plots require a categorical factor."
         )
 
@@ -477,27 +456,14 @@ def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: 
         - numerical_var_name is the name of the numerical variable used (may be auto-detected)
     """
     # Find result files
-    graph_file, model_file = find_result_files(results_dir)
-    if graph_file is None or model_file is None:
+    graph_path, model_path, suffix = find_result_files(results_dir)
+    if graph_path is None or model_path is None:
         raise FileNotFoundError(
             f"Could not find preference_graph_*.json and utility_model_*.json files in {results_dir}"
         )
     
-    # Extract suffix from filenames to use with ExperimentResults.load
-    graph_path = Path(graph_file)
-    model_path = Path(model_file)
-    
-    # Extract suffix: preference_graph_{suffix}.json -> {suffix}
-    graph_suffix = graph_path.stem.replace("preference_graph_", "")
-    model_suffix = model_path.stem.replace("utility_model_", "")
-    
-    if graph_suffix != model_suffix:
-        raise ValueError(
-            f"Suffix mismatch: graph has '{graph_suffix}', model has '{model_suffix}'"
-        )
-    
     # Load results using the new API
-    results = ExperimentResults.load(results_dir, graph_suffix)
+    results = ExperimentResults.load(results_dir, suffix)
     
     # Validate and infer variables
     validate_factor(results, factor_name)

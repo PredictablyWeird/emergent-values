@@ -9,63 +9,37 @@ Each line in the JSONL output contains:
 - "decision": either "A" or "B"
 
 CONFIGURATION:
-Field types for analysis are automatically read from results.graph.variables.
-Each Variable.type determines how it's analyzed:
-  - VariableType.NUMERICAL -> 'numerical' (simple difference)
-  - VariableType.LOG_NUMERICAL -> 'log_numerical' (log difference for diminishing returns)
-  - VariableType.CATEGORICAL -> 'categorical' (dummy variables)
-  - VariableType.ORDINAL -> 'categorical' (treated as categorical)
+Field types for analysis are automatically read from results.graph.analysis_config.
+Each field in AnalysisConfig determines how it's analyzed:
+  - AnalysisType.NUMERICAL -> 'numerical' (simple difference)
+  - AnalysisType.LOG_NUMERICAL -> 'log_numerical' (log difference for diminishing returns)
+  - AnalysisType.CATEGORICAL -> 'categorical' (dummy variables)
 
-To specify analysis type, use the appropriate Variable type when defining experiments:
-  - numerical('severity', [1, 2, 3]) -> simple difference
-  - log_numerical('N', [1, 2, 3, ...]) -> log difference
-  - categorical('gender', ['male', 'female']) -> dummy variables
+To specify analysis type, provide an AnalysisConfig when creating experiments:
+  - AnalysisConfig(fields={'severity': AnalysisType.NUMERICAL, 'N': AnalysisType.LOG_NUMERICAL, 'gender': AnalysisType.CATEGORICAL})
 """
 
 import json
 import argparse
 from typing import Dict, Any, List
-from pathlib import Path
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from scipy.stats import chi2
 
 from choices.results import ExperimentResults
-from choices.variable import VariableType
+from choices.variable import AnalysisType
+from choices.utils import find_result_files
 
 
 # Field extraction is now automatic based on results.graph.variables
 # No experiment-specific configuration needed here
 
 
-def find_result_files(results_dir: str):
-    """
-    Find preference_graph and utility_model JSON files in the directory.
-    
-    Returns:
-        (graph_file, model_file) tuple or (None, None) if not found
-    """
-    results_path = Path(results_dir)
-    
-    # Find preference_graph_*.json
-    graph_files = list(results_path.glob("preference_graph_*.json"))
-    if not graph_files:
-        return None, None
-    
-    # Find utility_model_*.json
-    model_files = list(results_path.glob("utility_model_*.json"))
-    if not model_files:
-        return None, None
-    
-    # Use the first file of each type (assuming only one)
-    return str(graph_files[0]), str(model_files[0])
-
-
 def extract_option_fields(option: Dict[str, Any], results: ExperimentResults) -> Dict[str, Any]:
     """
-    Extract relevant fields from an option dictionary based on experiment variables.
-    Completely generic - extracts all fields that correspond to variables.
+    Extract relevant fields from an option dictionary based on analysis config.
+    Only extracts fields that are defined in the analysis config.
     
     Args:
         option: Full option dictionary (can be ExperimentOption.to_dict() or dict)
@@ -82,12 +56,10 @@ def extract_option_fields(option: Dict[str, Any], results: ExperimentResults) ->
     if 'label' in option:
         extracted['label'] = option['label']
     
-    # Extract all fields that correspond to variables (variables are at top level)
-    # variables is a List[Variable], so we iterate over it
-    for variable in results.graph.variables:
-        var_name = variable.name
-        if var_name in option:
-            extracted[var_name] = option[var_name]
+    # Extract only fields that are in the analysis config
+    for field_name in results.graph.analysis_config.fields.keys():
+        if field_name in option:
+            extracted[field_name] = option[field_name]
     
     return extracted
 
@@ -204,33 +176,21 @@ def extract_comparisons_from_graph(results: ExperimentResults) -> List[Dict[str,
 
 def get_field_types_from_results(results: ExperimentResults) -> Dict[str, str]:
     """
-    Extract field types from experiment results.
+    Extract field types from experiment results analysis config.
     
-    Maps VariableType to analysis type string:
+    Maps AnalysisType to analysis type string:
     - CATEGORICAL -> 'categorical'
     - NUMERICAL -> 'numerical'
     - LOG_NUMERICAL -> 'log_numerical'
-    - ORDINAL -> 'categorical'
     
     Returns:
         Dict mapping field name to analysis type
     """
     field_types = {}
     
-    # variables is a List[Variable], so iterate over it
-    for variable in results.graph.variables:
-        var_name = variable.name
-        if variable.type == VariableType.CATEGORICAL:
-            field_types[var_name] = 'categorical'
-        elif variable.type == VariableType.NUMERICAL:
-            field_types[var_name] = 'numerical'
-        elif variable.type == VariableType.LOG_NUMERICAL:
-            field_types[var_name] = 'log_numerical'
-        elif variable.type == VariableType.ORDINAL:
-            field_types[var_name] = 'categorical'  # Treat ordinal as categorical
-        else:
-            # Default fallback
-            field_types[var_name] = 'categorical'
+    # Get field types from analysis config
+    for field_name, analysis_type in results.graph.analysis_config.fields.items():
+        field_types[field_name] = analysis_type.value
     
     return field_types
 
@@ -250,13 +210,13 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
     
     print(f"\nAnalyzing {len(comparisons)} comparisons")
     
-    if not results.graph.variables:
-        print("Error: No variables found in results. Cannot analyze.")
+    if not results.graph.analysis_config.fields:
+        print("Error: No analysis config found in results. Cannot analyze.")
         return
     
-    print(f"\nVariables defined in experiment:")
-    for variable in results.graph.variables:
-        print(f"  {variable.name}: {variable.type.value} ({len(variable.values)} values)")
+    print(f"\nFields configured for analysis:")
+    for field_name, analysis_type in results.graph.analysis_config.fields.items():
+        print(f"  {field_name}: {analysis_type.value}")
     
     # Convert to DataFrame - extract all fields from variables
     rows = []
@@ -267,13 +227,12 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
         
         row = {'choice': 1 if decision == 'A' else 0}
         
-        # Extract all fields that correspond to variables
-        for variable in results.graph.variables:
-            var_name = variable.name
-            # Variables are stored at top level in options
-            if var_name in option_a:
-                row[f'{var_name}_a'] = option_a.get(var_name)
-                row[f'{var_name}_b'] = option_b.get(var_name)
+        # Extract all fields that are in the analysis config
+        for field_name in results.graph.analysis_config.fields.keys():
+            # Fields are stored at top level in options
+            if field_name in option_a:
+                row[f'{field_name}_a'] = option_a.get(field_name)
+                row[f'{field_name}_b'] = option_b.get(field_name)
         
         rows.append(row)
     
@@ -287,21 +246,19 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
     # Detect factor field - use categorical variables as factors
     # Prefer factor_value if present, otherwise first categorical variable
     factor_field_name = None
-    # Check for factor_value variable
-    for variable in results.graph.variables:
-        if variable.name == 'factor_value':
-            if variable.type in [VariableType.CATEGORICAL, VariableType.ORDINAL]:
-                factor_field_name = 'factor_value'
-            break
+    from choices.variable import AnalysisType
+    # Check for factor_value field
+    if 'factor_value' in results.graph.analysis_config.fields:
+        if results.graph.analysis_config.fields['factor_value'] == AnalysisType.CATEGORICAL:
+            factor_field_name = 'factor_value'
     
     if factor_field_name is None:
-        # Check other categorical variables
-        for variable in results.graph.variables:
-            if variable.type in [VariableType.CATEGORICAL, VariableType.ORDINAL]:
-                var_name = variable.name
-                col_a = f'{var_name}_a'
+        # Check other categorical fields
+        for field_name, analysis_type in results.graph.analysis_config.fields.items():
+            if analysis_type == AnalysisType.CATEGORICAL:
+                col_a = f'{field_name}_a'
                 if col_a in df.columns and df[col_a].notna().any():
-                    factor_field_name = var_name
+                    factor_field_name = field_name
                     break
     
     if not field_types:
@@ -625,27 +582,15 @@ def main():
     args = parser.parse_args()
     
     # Find and load result files
-    graph_file, model_file = find_result_files(args.results_dir)
-    if graph_file is None or model_file is None:
+    graph_path, model_path, suffix = find_result_files(args.results_dir)
+    if graph_path is None or model_path is None:
         raise FileNotFoundError(
             f"Could not find preference_graph_*.json and utility_model_*.json files in {args.results_dir}"
         )
     
-    # Extract suffix from filenames
-    graph_path = Path(graph_file)
-    model_path = Path(model_file)
-    
-    graph_suffix = graph_path.stem.replace("preference_graph_", "")
-    model_suffix = model_path.stem.replace("utility_model_", "")
-    
-    if graph_suffix != model_suffix:
-        raise ValueError(
-            f"Suffix mismatch: graph has '{graph_suffix}', model has '{model_suffix}'"
-        )
-    
     # Load results
     print(f"Loading results from: {args.results_dir}")
-    results = ExperimentResults.load(args.results_dir, graph_suffix)
+    results = ExperimentResults.load(args.results_dir, suffix)
     
     # Extract comparisons directly from graph
     comparisons = extract_comparisons_from_graph(results)

@@ -16,7 +16,7 @@ import yaml
 import argparse
 from pathlib import Path
 
-from choices import Experiment, ExperimentConfig, PromptConfig, categorical, numerical, log_numerical
+from choices import AnalysisConfig, AnalysisType, Experiment, ExperimentConfig, PromptConfig, Variable
 
 
 # ============= Configuration Loading =============
@@ -35,10 +35,10 @@ def load_prompt_configs(yaml_path: str = PROMPT_CONFIGS_PATH) -> dict:
 
 # Define all possible factors (but we'll only use one per experiment)
 ALL_FACTORS = {
-    'gender': categorical('gender', ['male', 'female', 'transgender']),
-    'ethnicity': categorical('ethnicity', ['White', 'Black', 'Hispanic', 'South Asian', 'East Asian', 'Middle Eastern']),
-    'nationality': categorical('nationality', ['German', 'Japanese', 'Nigerian']),
-    'age_group': categorical('age_group', ['young (18-35)', 'middle (36-55)', 'older (56-75)', 'elderly (76+)']),
+    'gender': Variable(name='gender', values=['male', 'female', 'transgender']),
+    'ethnicity': Variable(name='ethnicity', values=['White', 'Black', 'Hispanic', 'South Asian', 'East Asian', 'Middle Eastern']),
+    'nationality': Variable(name='nationality', values=['German', 'Japanese', 'Nigerian']),
+    'age_group': Variable(name='age_group', values=['young (18-35)', 'middle (36-55)', 'older (56-75)', 'elderly (76+)']),
 }
 
 # N value options
@@ -171,8 +171,15 @@ def create_experiment_from_yaml_config(
     # Create variables (only the selected factor + N) - convert to list of Variable objects
     variables = [
         ALL_FACTORS[factor_name],
-        log_numerical('N', N_VALUES[n_values_key])  # Use log_numerical for diminishing returns
+        Variable(name='N', values=N_VALUES[n_values_key])
     ]
+
+    analysis_config = AnalysisConfig(
+        fields={
+            factor_name: AnalysisType.CATEGORICAL,
+            'N': AnalysisType.NUMERICAL
+        }
+    )
     
     # Create prompt config with custom option text generator
     setup_text = SETUPS.get(setup, setup)  # Use as key or direct string
@@ -192,7 +199,7 @@ def create_experiment_from_yaml_config(
         utility_config_key=utility_config_key
     )
     
-    return variables, prompt_config, experiment_config
+    return variables, prompt_config, experiment_config, analysis_config
 
 
 # ============= Run Experiment =============
@@ -222,7 +229,7 @@ async def run_experiment_from_config(
     yaml_config = all_configs[config_name]
     
     # Create configuration
-    variables, prompt_config, experiment_config = create_experiment_from_yaml_config(
+    variables, prompt_config, experiment_config, analysis_config = create_experiment_from_yaml_config(
         config_name=config_name,
         yaml_config=yaml_config,
         model=model,
@@ -234,7 +241,8 @@ async def run_experiment_from_config(
         name=config_name,
         variables=variables,
         prompt_config=prompt_config,
-        experiment_config=experiment_config
+        experiment_config=experiment_config,
+        analysis_config=analysis_config
     )
     
     # Run it

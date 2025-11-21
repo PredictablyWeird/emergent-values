@@ -18,6 +18,7 @@ from ..results import (
     UtilityModelResults,
     ExperimentOption,
 )
+from ..variable import AnalysisConfig
 from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 
 from .thurstonian import (
@@ -382,7 +383,8 @@ async def compute_utilities(
     save_dir: str = "results",
     save_suffix: Optional[str] = None,
     edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
-    variables: Optional[List] = None
+    variables: Optional[List] = None,
+    analysis_config: Optional[AnalysisConfig] = None
 ) -> ExperimentResults:
     """
     Compute utilities for a set of options using a specified utility model.
@@ -403,7 +405,9 @@ async def compute_utilities(
         edge_filter: Optional function returning True to keep edge, False to exclude.
                 Called with (option_a, option_b) dictionaries.
         variables: Optional list of Variable objects. Used to preserve
-                variable metadata (type, values, etc.) in the results for analysis scripts.
+                variable metadata (values, etc.) in the results for analysis scripts.
+        analysis_config: Optional AnalysisConfig object. Defines which fields to analyze
+                and their analysis types. Saved to results for use by analysis scripts.
         
     Returns:
         ExperimentResults object containing structured results with graph data and utility model
@@ -553,6 +557,7 @@ async def compute_utilities(
         training_edges=graph_data['training_edges'],
         holdout_edges=graph_data.get('holdout_edge_indices'),
         variables=variables if variables is not None else [],
+        analysis_config=analysis_config or AnalysisConfig(),
         config=graph_config
     )
     

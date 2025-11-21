@@ -4,17 +4,50 @@ Variable definitions for experiments.
 Variables define the dimensions along which options vary.
 """
 
-from dataclasses import dataclass
-from typing import List, Any, Literal
+from dataclasses import dataclass, field
+from typing import List, Any, Dict, Optional
 from enum import Enum
 
 
-class VariableType(Enum):
-    """Type of variable."""
+class AnalysisType(Enum):
+    """Analysis type for a field in an option."""
     CATEGORICAL = "categorical"  # Discrete categories (gender, country, etc.)
     NUMERICAL = "numerical"      # Numeric values (N, age, etc.) - simple difference
     LOG_NUMERICAL = "log_numerical"  # Numeric values with log transform (for diminishing returns)
-    ORDINAL = "ordinal"          # Ordered categories (age groups, etc.)
+
+
+@dataclass
+class AnalysisConfig:
+    """
+    Configuration for analyzing experiment results.
+    
+    Defines which fields from options should be considered for analysis
+    and how they should be analyzed (categorical, numerical, log_numerical).
+    
+    Attributes:
+        fields: Dictionary mapping field names to their analysis types
+                e.g., {'gender': AnalysisType.CATEGORICAL, 'N': AnalysisType.LOG_NUMERICAL}
+    """
+    fields: Dict[str, AnalysisType] = field(default_factory=dict)
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary representation."""
+        return {
+            'fields': {name: atype.value for name, atype in self.fields.items()}
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AnalysisConfig':
+        """Create from dictionary representation."""
+        fields = {}
+        if 'fields' in data:
+            for name, atype_str in data['fields'].items():
+                fields[name] = AnalysisType(atype_str)
+        return cls(fields=fields)
+    
+    def get_analysis_type(self, field_name: str) -> Optional[AnalysisType]:
+        """Get analysis type for a field, or None if not configured."""
+        return self.fields.get(field_name)
 
 
 @dataclass
@@ -25,12 +58,10 @@ class Variable:
     Attributes:
         name: Variable name (e.g., 'gender', 'N', 'country')
         values: List of possible values this variable can take
-        type: Type of variable (categorical, numerical, or ordinal)
         description: Optional human-readable description
     """
     name: str
     values: List[Any]
-    type: VariableType = VariableType.CATEGORICAL
     description: str = ""
     
     def __post_init__(self):
@@ -47,27 +78,5 @@ class Variable:
         return {
             'name': self.name,
             'values': self.values,
-            'type': self.type.value,
             'description': self.description
         }
-
-
-def categorical(name: str, values: List[Any], description: str = "") -> Variable:
-    """Helper to create a categorical variable."""
-    return Variable(name=name, values=values, type=VariableType.CATEGORICAL, description=description)
-
-
-def numerical(name: str, values: List[float], description: str = "") -> Variable:
-    """Helper to create a numerical variable."""
-    return Variable(name=name, values=values, type=VariableType.NUMERICAL, description=description)
-
-
-def log_numerical(name: str, values: List[float], description: str = "") -> Variable:
-    """Helper to create a log-numerical variable (for diminishing returns analysis)."""
-    return Variable(name=name, values=values, type=VariableType.LOG_NUMERICAL, description=description)
-
-
-def ordinal(name: str, values: List[Any], description: str = "") -> Variable:
-    """Helper to create an ordinal variable."""
-    return Variable(name=name, values=values, type=VariableType.ORDINAL, description=description)
-
