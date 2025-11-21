@@ -76,14 +76,16 @@ def extract_option_fields(option: Dict[str, Any], results: ExperimentResults) ->
     """
     extracted = {}
     
-    # Always extract id and description
+    # Always extract id and label
     if 'id' in option:
         extracted['id'] = option['id']
-    if 'description' in option:
-        extracted['description'] = option['description']
+    if 'label' in option:
+        extracted['label'] = option['label']
     
     # Extract all fields that correspond to variables (variables are at top level)
-    for var_name in results.graph.variables.keys():
+    # variables is a List[Variable], so we iterate over it
+    for variable in results.graph.variables:
+        var_name = variable.name
         if var_name in option:
             extracted[var_name] = option[var_name]
     
@@ -130,11 +132,32 @@ def extract_comparisons_from_graph(results: ExperimentResults) -> List[Dict[str,
             original_parsed = original_responses
             flipped_parsed = flipped_responses
         
-        # Extract relevant fields from options
-        # Convert ExperimentOption to dict if needed
-        if hasattr(option_A, 'to_dict'):
+        # Handle case where option_A/option_B are strings (label or id) instead of dicts
+        # This happens when graph data is exported - options are stored as strings
+        if isinstance(option_A, str):
+            # Look up the full option by id or label
+            option_A_obj = None
+            for opt in results.graph.options:
+                if str(opt.id) == option_A or opt.label == option_A:
+                    option_A_obj = opt
+                    break
+            if option_A_obj is None:
+                raise ValueError(f"Could not find option with id/label: {option_A}")
+            option_A = option_A_obj.to_dict()
+        elif hasattr(option_A, 'to_dict'):
             option_A = option_A.to_dict()
-        if hasattr(option_B, 'to_dict'):
+        
+        if isinstance(option_B, str):
+            # Look up the full option by id or label
+            option_B_obj = None
+            for opt in results.graph.options:
+                if str(opt.id) == option_B or opt.label == option_B:
+                    option_B_obj = opt
+                    break
+            if option_B_obj is None:
+                raise ValueError(f"Could not find option with id/label: {option_B}")
+            option_B = option_B_obj.to_dict()
+        elif hasattr(option_B, 'to_dict'):
             option_B = option_B.to_dict()
         
         option_A_extracted = extract_option_fields(option_A, results)
@@ -194,7 +217,9 @@ def get_field_types_from_results(results: ExperimentResults) -> Dict[str, str]:
     """
     field_types = {}
     
-    for var_name, variable in results.graph.variables.items():
+    # variables is a List[Variable], so iterate over it
+    for variable in results.graph.variables:
+        var_name = variable.name
         if variable.type == VariableType.CATEGORICAL:
             field_types[var_name] = 'categorical'
         elif variable.type == VariableType.NUMERICAL:
@@ -230,8 +255,8 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
         return
     
     print(f"\nVariables defined in experiment:")
-    for var_name, variable in results.graph.variables.items():
-        print(f"  {var_name}: {variable.type.value} ({len(variable)} values)")
+    for variable in results.graph.variables:
+        print(f"  {variable.name}: {variable.type.value} ({len(variable.values)} values)")
     
     # Convert to DataFrame - extract all fields from variables
     rows = []
@@ -243,7 +268,8 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
         row = {'choice': 1 if decision == 'A' else 0}
         
         # Extract all fields that correspond to variables
-        for var_name in results.graph.variables.keys():
+        for variable in results.graph.variables:
+            var_name = variable.name
             # Variables are stored at top level in options
             if var_name in option_a:
                 row[f'{var_name}_a'] = option_a.get(var_name)
@@ -261,14 +287,18 @@ def analyze_decision_factors(comparisons: List[Dict[str, Any]], results: Experim
     # Detect factor field - use categorical variables as factors
     # Prefer factor_value if present, otherwise first categorical variable
     factor_field_name = None
-    if 'factor_value' in results.graph.variables:
-        if results.graph.variables['factor_value'].type in [VariableType.CATEGORICAL, VariableType.ORDINAL]:
-            factor_field_name = 'factor_value'
+    # Check for factor_value variable
+    for variable in results.graph.variables:
+        if variable.name == 'factor_value':
+            if variable.type in [VariableType.CATEGORICAL, VariableType.ORDINAL]:
+                factor_field_name = 'factor_value'
+            break
     
     if factor_field_name is None:
         # Check other categorical variables
-        for var_name, variable in results.graph.variables.items():
+        for variable in results.graph.variables:
             if variable.type in [VariableType.CATEGORICAL, VariableType.ORDINAL]:
+                var_name = variable.name
                 col_a = f'{var_name}_a'
                 if col_a in df.columns and df[col_a].notna().any():
                     factor_field_name = var_name

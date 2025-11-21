@@ -4,20 +4,9 @@ Generate exchange rate plots for experiments.
 
 This script creates exchange rate plots from experiment results using
 the new choices framework results format.
-
-Usage:
-    python create_exchange_rates_plots.py --results_dir results/my_experiment/gpt-4o-mini/20251117_120000 \\
-                                          --factor gender \\
-                                          --numerical_var N
-
-For experiments with exchange rates (varying N and a categorical factor X):
-    - Results must have options with both a numerical variable (N) and a categorical factor (X)
-    - The script will fit utility curves U = b + a*ln(N) for each X value
-    - Plots show exchange rates between different X values
 """
 
 import os
-import json
 import math
 import argparse
 import numpy as np
@@ -406,9 +395,10 @@ def infer_numerical_variable(results: ExperimentResults, provided_var: str = Non
     """
     # Get all numerical variables (both NUMERICAL and LOG_NUMERICAL)
     all_numerical = {}
-    for name, var in results.graph.variables.items():
+    # variables is a List[Variable], so iterate over it
+    for var in results.graph.variables:
         if var.type in (VariableType.NUMERICAL, VariableType.LOG_NUMERICAL):
-            all_numerical[name] = var
+            all_numerical[var.name] = var
     
     if not all_numerical:
         raise ValueError(
@@ -451,14 +441,20 @@ def validate_factor(results: ExperimentResults, factor_name: str) -> None:
     Raises:
         ValueError if factor doesn't exist or isn't categorical
     """
-    if factor_name not in results.graph.variables:
+    # Look up the variable by name (variables is a List[Variable])
+    var = None
+    for v in results.graph.variables:
+        if v.name == factor_name:
+            var = v
+            break
+    
+    if var is None:
         categorical_vars = list(results.graph.get_categorical_variables().keys())
         raise ValueError(
             f"Factor '{factor_name}' not found in results. "
             f"Available categorical variables: {categorical_vars}"
         )
     
-    var = results.graph.variables[factor_name]
     if var.type != VariableType.CATEGORICAL:
         raise ValueError(
             f"Factor '{factor_name}' is not categorical (type: {var.type.value}). "
@@ -477,7 +473,7 @@ def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: 
     
     Returns:
         Tuple of (DataFrame, numerical_var_name) where:
-        - DataFrame has columns: option_id, description, utility_mean, utility_variance, {numerical_var}, X, lnN
+        - DataFrame has columns: option_id, label, utility_mean, utility_variance, {numerical_var}, X, lnN
         - numerical_var_name is the name of the numerical variable used (may be auto-detected)
     """
     # Find result files
@@ -533,7 +529,7 @@ def load_exchange_rates_data(results_dir: str, factor_name: str, numerical_var: 
         
         rows.append({
             "option_id": opt.id,
-            "description": opt.description,
+            "label": opt.label,
             "utility_mean": util_mean,
             "utility_variance": util_var,
             numerical_var: N_val,
@@ -971,12 +967,12 @@ Example usage:
   
   # Basic usage - plots for a gender factor experiment
   python create_exchange_rates_plots.py \\
-      --results_dir results/exchange_rates_gender/gpt-4o-mini/20251117_120000 \\
+      results/exchange_rates_gender/gpt-4o-mini/20251117_120000 \\
       --factor gender
   
   # With custom options
   python create_exchange_rates_plots.py \\
-      --results_dir results/exchange_rates_ethnicity/gpt-4o-mini/20251117_120000 \\
+      results/exchange_rates_ethnicity/gpt-4o-mini/20251117_120000 \\
       --factor ethnicity \\
       --canonical_x White \\
       --include_xs White Black Hispanic
@@ -984,8 +980,7 @@ Example usage:
     )
     
     parser.add_argument(
-        '--results_dir',
-        required=True,
+        'results_dir',
         help='Directory containing preference_graph and utility_model JSON files'
     )
     parser.add_argument(
