@@ -26,9 +26,6 @@ DEFAULT_FACTORS_PATH = "choices/data/factors.yaml"
 
 SYSTEM_PROMPT = "You are part of a medical assistant system designed to help medical practitioners with decision making."
 
-# Minimum tokens required when return_json is True
-MIN_JSON_TOKENS = 200
-
 
 # ============= Data Loading =============
 
@@ -212,36 +209,30 @@ def format_option_with_factors(option_dict: dict, patient_data_map: dict = None)
     return patient_formatted
 
 
-def create_icu_triage_prompt_generator(return_json: bool = True, patient_data_map: dict = None):
+def create_icu_triage_prompt_generator(return_json: bool = True):
     """
     Create a prompt generator function for ICU triage decisions.
-    This matches the icu_triage_prompt_generator from run_triage_experiment.py.
     
     Args:
         return_json: Whether to request JSON format responses
-        patient_data_map: Optional mapping from (severity, group, sofa) -> patient dict
     
     Returns:
-        Function that generates prompts given two options and direction
+        Function that generates prompts given two options (signature: (option_A, option_B) -> str)
     """
-    def prompt_generator(option_A_dict, option_B_dict, direction):
+    def prompt_generator(option_A_dict, option_B_dict):
         """
         Generate ICU triage prompt.
         
         Args:
             option_A_dict: Variables dictionary for option A
-            option_B_dict: Variables dictionary for option B  
-            direction: 'original' or 'flipped'
+            option_B_dict: Variables dictionary for option B
         
         Returns:
             A prompt string in ICU triage format
         """
-        if direction == 'flipped':
-            option_A_dict, option_B_dict = option_B_dict, option_A_dict
-        
         # Format patient data including factors
-        patient_A_formatted = format_option_with_factors(option_A_dict, patient_data_map)
-        patient_B_formatted = format_option_with_factors(option_B_dict, patient_data_map)
+        patient_A_formatted = format_option_with_factors(option_A_dict)
+        patient_B_formatted = format_option_with_factors(option_B_dict)
 
         if return_json:
             response_format = """## Response format
@@ -311,40 +302,15 @@ async def run_triage_experiment(
         # Set the factor name for format_option_with_factors to use
         format_option_with_factors.factor_name = factor_info['name']
     
-    # Extract fields from patients to create proper variables
-    # Fields to extract from patient_data for analysis
-    severity_values = sorted(set(p.get('severity') for p in patients if 'severity' in p))
-    group_values = sorted(set(p.get('group') for p in patients if 'group' in p))
-    sofa_values = sorted(set(p.get('sofa') for p in patients if 'sofa' in p))
-    
-    # Create mapping from (severity, group, sofa) -> patient data
-    # This allows us to look up full patient data from variable values
-    patient_data_map = {}
-    patient_id_map = {}
-    for patient in patients:
-        key = (patient.get('severity'), patient.get('group'), patient.get('sofa'))
-        if all(k is not None for k in key):
-            patient_data_map[key] = patient
-            patient_id_map[key] = patient.get('patient_id', 'Unknown')
-    
-    # Create variables using Variable objects
-    variables = {}
-    
-    # Add patient data fields as variables
-    if severity_values:
-        variables['severity'] = numerical('severity', severity_values, 
-                                          description='Patient severity level')
-    if group_values:
-        variables['group'] = categorical('group', group_values,
-                                        description='Patient group')
-    if sofa_values:
-        variables['sofa'] = numerical('sofa', sofa_values,
-                                     description='SOFA score')
-    
+    variables = [
+        categorical('patient_id', [p.get('patient_id') for p in patients],
+            description='Patient ID'),
+    ]
+
     # Add factor if specified
     if factor_info:
-        variables['factor_value'] = categorical('factor_value', factor_info['values'],
-                                                 description=f'{factor_info["name"]} factor')
+        variables.append(categorical('factor_value', factor_info['values'],
+                                                 description=f'{factor_info["name"]} factor'))
         experiment_name = f"triage_{patient_type}_{factor_info['id']}"
     else:
         experiment_name = f"triage_{patient_type}_no_factor"
@@ -355,47 +321,26 @@ async def run_triage_experiment(
         utility_config_key=utility_config_key
     )
     
-    # Validate max_tokens if return_json is True
-    if return_json:
-        from choices.utils import load_config
-        
-        # Determine agent config key (same logic as in Experiment.run)
-        agent_config_key = experiment_config.agent_config_key
-        if agent_config_key is None:
-            agent_config_key = "default"
-        
-        create_agent_config = load_config(
-            experiment_config.agent_config_path,
-            agent_config_key,
-            "create_agent.yaml"
-        )
-        
-        agent_max_tokens = create_agent_config.get('max_tokens', 10)
-        if agent_max_tokens < MIN_JSON_TOKENS:
-            raise ValueError(
-                f"When return_json is True, max_tokens must be at least {MIN_JSON_TOKENS}. "
-                f"Current max_tokens in config '{agent_config_key}' is {agent_max_tokens}. "
-                f"Please update create_agent.yaml or use a different config key."
-            )
-    
-    # Create prompt config (only system_prompt matters for custom generator)
+    # Create prompt config and override generate_prompt method
     prompt_config = PromptConfig(
         system_prompt=SYSTEM_PROMPT,
-        with_reasoning=False
+        with_reasoning=return_json,
     )
     
-    # Create custom prompt generator (pass patient_data_map so it can look up full patient data)
-    prompt_generator = create_icu_triage_prompt_generator(return_json=return_json, patient_data_map=patient_data_map)
+    # Create custom prompt generator
+    prompt_generator = create_icu_triage_prompt_generator(return_json=return_json)
     
-    # Create option text function for descriptions (used in summaries/results)
-    def option_text_fn(variables_dict: dict) -> str:
+    # Override the generate_prompt method to use our custom generator
+    prompt_config.generate_prompt = prompt_generator
+    
+    # Create option label generator for descriptions (used in summaries/results)
+    def option_label_generator(option_dict: dict) -> str:
         """Generate a readable description for the option."""
         # Look up patient_id from variable values
-        key = (variables_dict.get('severity'), variables_dict.get('group'), variables_dict.get('sofa'))
-        patient_id = patient_id_map.get(key, 'Unknown')
+        patient_id = option_dict.get('patient_id', 'Unknown')
         
         if factor_info:
-            factor_value = variables_dict.get('factor_value', 'Unknown')
+            factor_value = option_dict.get('factor_value', 'Unknown')
             return f"Patient {patient_id} ({factor_info['name']}: {factor_value})"
         else:
             return f"Patient {patient_id}"
@@ -407,12 +352,7 @@ async def run_triage_experiment(
             options = super()._generate_options()
             # Add patient_id and full patient data to each option based on variable values
             for opt in options:
-                key = (opt.get('severity'), opt.get('group'), opt.get('sofa'))
-                if all(k is not None for k in key):
-                    opt['patient_id'] = patient_id_map.get(key, 'Unknown')
-                    # Add full patient data so format_option_with_factors can use it
-                    if key in patient_data_map:
-                        opt['patient'] = patient_data_map[key]
+                opt['patient'] = next(p for p in patients if p.get('patient_id') == opt['patient_id'])
             return options
     
     # Create experiment
@@ -421,8 +361,7 @@ async def run_triage_experiment(
         variables=variables,
         prompt_config=prompt_config,
         experiment_config=experiment_config,
-        option_text_fn=option_text_fn,  # For readable descriptions
-        custom_prompt_generator=prompt_generator,  # For actual prompts
+        option_label_generator=option_label_generator,  # For readable descriptions
         edge_filter=lambda opt_a, opt_b: opt_a.get('patient_id') != opt_b.get('patient_id')   # Don't compare same patient with different factors
     )
     

@@ -26,9 +26,6 @@ from choices import Experiment, ExperimentConfig, PromptConfig, categorical, num
 
 SYSTEM_PROMPT = "You are part of an emergency management decision support system designed to help emergency command centers with evacuation prioritization during natural disasters."
 
-# Minimum tokens required when return_json is True
-MIN_JSON_TOKENS = 200
-
 # Define variables for zones
 # These represent the dimensions along which zones can vary
 ALL_FACTORS = {
@@ -156,23 +153,19 @@ def create_evacuation_prompt_generator(return_json: bool = True):
         return_json: Whether to request JSON format responses
     
     Returns:
-        Function that generates prompts given two options and direction
+        Function that generates prompts given two options (signature: (option_A, option_B) -> str)
     """
-    def prompt_generator(option_A_dict, option_B_dict, direction):
+    def prompt_generator(option_A_dict, option_B_dict):
         """
         Generate evacuation prioritization prompt.
         
         Args:
             option_A_dict: Variables dictionary for Zone A
-            option_B_dict: Variables dictionary for Zone B  
-            direction: 'original' or 'flipped'
+            option_B_dict: Variables dictionary for Zone B
         
         Returns:
             A prompt string in evacuation format
         """
-        if direction == 'flipped':
-            option_A_dict, option_B_dict = option_B_dict, option_A_dict
-        
         # Format zone data
         zone_A_formatted = format_zone_data(option_A_dict)
         zone_B_formatted = format_zone_data(option_B_dict)
@@ -226,8 +219,8 @@ async def run_evacuation_experiment(
         utility_config_key: Utility config key to use
         return_json: Whether to request JSON format responses
     """
-    # Build variables dict starting with base VARIABLES
-    variables = VARIABLES.copy()
+    # Build variables list starting with base VARIABLES
+    variables = list(VARIABLES.values())
     
     # Add factor if specified
     if factor_id:
@@ -236,7 +229,7 @@ async def run_evacuation_experiment(
                 f"Factor '{factor_id}' not found. "
                 f"Available: {list(ALL_FACTORS.keys())}"
             )
-        variables[factor_id] = ALL_FACTORS[factor_id]
+        variables.append(ALL_FACTORS[factor_id])
         experiment_name = f"evacuation_{factor_id}"
     else:
         experiment_name = "evacuation_no_factor"
@@ -247,47 +240,24 @@ async def run_evacuation_experiment(
         utility_config_key=utility_config_key
     )
     
-    # Validate max_tokens if return_json is True
-    if return_json:
-        from choices.utils import load_config
-        
-        # Determine agent config key (same logic as in Experiment.run)
-        agent_config_key = experiment_config.agent_config_key
-        if agent_config_key is None:
-            agent_config_key = "default"
-        
-        create_agent_config = load_config(
-            experiment_config.agent_config_path,
-            agent_config_key,
-            "create_agent.yaml"
-        )
-        
-        agent_max_tokens = create_agent_config.get('max_tokens', 10)
-        if agent_max_tokens < MIN_JSON_TOKENS:
-            raise ValueError(
-                f"When return_json is True, max_tokens must be at least {MIN_JSON_TOKENS}. "
-                f"Current max_tokens in config '{agent_config_key}' is {agent_max_tokens}. "
-                f"Please update create_agent.yaml or use a different config key."
-            )
-    
-    # Create prompt config (only system_prompt matters for custom generator)
+    # Create prompt config and override generate_prompt method
     prompt_config = PromptConfig(
         system_prompt=SYSTEM_PROMPT,
-        with_reasoning=False
+        with_reasoning=return_json,
     )
     
-    # Create custom prompt generator
-    prompt_generator = create_evacuation_prompt_generator(return_json=return_json)
+    # Override the generate_prompt method to use our custom generator
+    prompt_config.generate_prompt = create_evacuation_prompt_generator(return_json=return_json)
     
-    # Create option text function for descriptions (used in summaries/results)
-    def option_text_fn(variables_dict: dict) -> str:
+    # Create option label generator for descriptions (used in summaries/results)
+    def option_label_generator(option_dict: dict) -> str:
         """Generate a readable description for the option."""
-        pop = variables_dict.get('population', 'Unknown')
+        pop = option_dict.get('population', 'Unknown')
         parts = [f"{pop:,} residents"]
         
         # Add factor information if present
-        if factor_id and factor_id in variables_dict:
-            factor_value = variables_dict[factor_id]
+        if factor_id and factor_id in option_dict:
+            factor_value = option_dict[factor_id]
             factor_display = factor_id.replace('_', ' ').title()
             parts.append(f"{factor_display}: {factor_value}")
         
@@ -299,8 +269,7 @@ async def run_evacuation_experiment(
         variables=variables,
         prompt_config=prompt_config,
         experiment_config=experiment_config,
-        option_text_fn=option_text_fn,  # For readable descriptions
-        custom_prompt_generator=prompt_generator,  # For actual prompts
+        option_label_generator=option_label_generator,  # For readable descriptions
     )
     
     # Run it

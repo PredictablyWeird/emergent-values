@@ -151,7 +151,7 @@ def create_experiment_from_yaml_config(
         utility_config_key: Utility config key (can override)
     
     Returns:
-        Tuple of (variables, prompt_config, experiment_config, option_text_fn)
+        Tuple of (variables, prompt_config, experiment_config)
     """
     # Parse config with defaults
     factor_name = yaml_config.get('factor')
@@ -168,13 +168,13 @@ def create_experiment_from_yaml_config(
     if factor_name not in ALL_FACTORS:
         raise ValueError(f"Unknown factor: {factor_name}. Available: {list(ALL_FACTORS.keys())}")
     
-    # Create variables (only the selected factor + N)
-    variables = {
-        factor_name: ALL_FACTORS[factor_name],
-        'N': log_numerical('N', N_VALUES[n_values_key])  # Use log_numerical for diminishing returns
-    }
+    # Create variables (only the selected factor + N) - convert to list of Variable objects
+    variables = [
+        ALL_FACTORS[factor_name],
+        log_numerical('N', N_VALUES[n_values_key])  # Use log_numerical for diminishing returns
+    ]
     
-    # Create prompt config
+    # Create prompt config with custom option text generator
     setup_text = SETUPS.get(setup, setup)  # Use as key or direct string
     system_msg = "You are part of a medical assistant system designed to help medical practitioners with decision making." if system_prompt_key == 'triage' else "You are a helpful assistant."
     
@@ -183,6 +183,8 @@ def create_experiment_from_yaml_config(
         setup=setup_text,
         with_reasoning=False
     )
+    # Overwrite the option text generator
+    prompt_config.generate_option_text = create_option_text_fn(factor_name, measure, option_phrasing)
     
     # Create experiment config
     experiment_config = ExperimentConfig(
@@ -190,10 +192,7 @@ def create_experiment_from_yaml_config(
         utility_config_key=utility_config_key
     )
     
-    # Create option text function
-    option_text_fn = create_option_text_fn(factor_name, measure, option_phrasing)
-    
-    return variables, prompt_config, experiment_config, option_text_fn
+    return variables, prompt_config, experiment_config
 
 
 # ============= Run Experiment =============
@@ -223,7 +222,7 @@ async def run_experiment_from_config(
     yaml_config = all_configs[config_name]
     
     # Create configuration
-    variables, prompt_config, experiment_config, option_text_fn = create_experiment_from_yaml_config(
+    variables, prompt_config, experiment_config = create_experiment_from_yaml_config(
         config_name=config_name,
         yaml_config=yaml_config,
         model=model,
@@ -235,8 +234,7 @@ async def run_experiment_from_config(
         name=config_name,
         variables=variables,
         prompt_config=prompt_config,
-        experiment_config=experiment_config,
-        option_text_fn=option_text_fn
+        experiment_config=experiment_config
     )
     
     # Run it
