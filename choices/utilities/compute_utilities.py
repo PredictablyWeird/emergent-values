@@ -157,8 +157,8 @@ class PreferenceGraph:
             'options': self.options,
             'edges': {
                 str(edge_key): {
-                    'option_A': edge.option_A['id'],
-                    'option_B': edge.option_B['id'],
+                    'option_A': edge.option_A['label'] if 'label' in edge.option_A else edge.option_A['id'],
+                    'option_B': edge.option_B['label'] if 'label' in edge.option_B else edge.option_B['id'],
                     'probability_A': edge.probability_A,
                     'aux_data': edge.aux_data
                 }

@@ -105,6 +105,7 @@ class Experiment:
         prompt_config: PromptConfig,
         experiment_config: ExperimentConfig,
         edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
+        option_label_generator: Optional[Callable[[Dict[str, Any]], str]] = None,
         run_id: Optional[str] = None,
     ):
         """
@@ -117,6 +118,8 @@ class Experiment:
             experiment_config: Configuration for running the experiment
             edge_filter: Optional function returning True to keep edge, False to exclude.
                     Called with (option_a, option_b) dictionaries.
+            option_label_generator: Optional function that takes an option dictionary and returns a label string
+                    to be used for display purposes.
             run_id: Run identifier. If None, auto-generated
         """
         self.name = self._sanitize_name(name)
@@ -127,6 +130,7 @@ class Experiment:
         self.prompt_config = prompt_config
         self.experiment_config = experiment_config
         self.edge_filter = edge_filter
+        self.option_label_generator = option_label_generator
         self.run_id = run_id or self._generate_run_id()
         
         # Generated lazily
@@ -161,8 +165,20 @@ class Experiment:
             
             if 'id' not in option:
                 option['id'] = idx
-            
+            if self.option_label_generator is not None:
+                option['label'] = self.option_label_generator(option)
+                
             options.append(option)
+
+        for option in options:
+            if 'label' not in option:
+                # Some useful defaults for the option label
+                if len(var_names) == 1:
+                    option['label'] = option[var_names[0]]
+                elif 'text' in option and all('text' in opt and len(opt['text']) < 100 for opt in options):
+                    option['label'] = option['text']
+                else:
+                    option['label'] = f"Option({', '.join([f'{name}={value}' for name, value in option.items() if name != 'id'])})"
         
         return options
     
@@ -203,7 +219,7 @@ class Experiment:
                 print(f"  {var.name} ({var.type.value}): {len(var.values)} values")
             print(f"\nExample options:")
             for opt in options[:3]:
-                print(f"  - {opt['id']}")
+                print(f"  - {opt['label']}")
         
         # Determine agent config key
         agent_config_key = self.experiment_config.agent_config_key
