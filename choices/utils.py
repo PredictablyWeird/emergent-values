@@ -7,7 +7,7 @@ import time
 import yaml
 import numpy as np
 import random
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Callable
 from .llm_agent import LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
 import re
 from tqdm import tqdm
@@ -563,7 +563,7 @@ async def evaluate_holdout_set(
     agent,
     utility_model,
     utilities,
-    comparison_prompt_template,
+    comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
     system_message=None,
     with_reasoning=False,
     K=10
@@ -576,7 +576,7 @@ async def evaluate_holdout_set(
         agent: Agent instance for generating responses
         utility_model: UtilityModel instance for processing responses
         utilities: Dictionary of computed utilities
-        comparison_prompt_template: Template for comparison prompts
+        comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
         system_message: Optional system message for the agent
         with_reasoning: Whether to use reasoning-based response parsing
         K: Number of responses to generate per prompt
@@ -591,7 +591,7 @@ async def evaluate_holdout_set(
     # Generate prompts for holdout edges
     holdout_preference_data, holdout_prompts, holdout_prompt_idx_to_key = graph.generate_prompts(
         list(graph.holdout_edge_indices),
-        comparison_prompt_template
+        comparison_prompt_generator
     )
     
     # Generate responses for holdout edges

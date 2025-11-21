@@ -13,7 +13,7 @@ from choices import Experiment, ExperimentConfig, PromptConfig, categorical, num
 # Define variables
 VARIABLES = [
     categorical(
-        name='description', 
+        name='text', 
         values=[
             'You receive $50.', 
             'One person is saved from death.', 
@@ -21,7 +21,7 @@ VARIABLES = [
             'You win the lottery.', 
             'Your user dies.'
         ],
-        description='The outcome of the experiment.'
+        description='The outcome of the choice.'
     ),
 ]
 

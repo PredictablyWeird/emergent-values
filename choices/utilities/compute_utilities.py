@@ -6,9 +6,9 @@ import itertools
 import os
 import copy
 import networkx as nx
+
 from ..utils import (
     create_agent,
-    flatten_hierarchical_options,
     load_config,
     evaluate_holdout_set
 )
@@ -157,8 +157,8 @@ class PreferenceGraph:
             'options': self.options,
             'edges': {
                 str(edge_key): {
-                    'option_A': edge.option_A,
-                    'option_B': edge.option_B,
+                    'option_A': edge.option_A['id'],
+                    'option_B': edge.option_B['id'],
                     'probability_A': edge.probability_A,
                     'aux_data': edge.aux_data
                 }
@@ -382,7 +382,7 @@ async def compute_utilities(
     save_dir: str = "results",
     save_suffix: Optional[str] = None,
     edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
-    variables: Optional[Dict[str, Any]] = None
+    variables: Optional[List] = None
 ) -> ExperimentResults:
     """
     Compute utilities for a set of options using a specified utility model.
@@ -402,7 +402,7 @@ async def compute_utilities(
         save_suffix: Suffix for saved files
         edge_filter: Optional function returning True to keep edge, False to exclude.
                 Called with (option_a, option_b) dictionaries.
-        variables: Optional dictionary mapping variable names to Variable objects. Used to preserve
+        variables: Optional list of Variable objects. Used to preserve
                 variable metadata (type, values, etc.) in the results for analysis scripts.
         
     Returns:
@@ -439,10 +439,6 @@ async def compute_utilities(
         create_agent_config = load_config(create_agent_config_path, create_agent_config_key or "default", "create_agent.yaml")
         agent = create_agent(model_key=model_key, **create_agent_config)
         
-    # Process options
-    if isinstance(options_list, dict):
-        options_list = flatten_hierarchical_options(options_list)
-    
     # Get utility model class
     utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
     utility_model_classes = {
@@ -556,7 +552,7 @@ async def compute_utilities(
         edges=graph_data['edges'],
         training_edges=graph_data['training_edges'],
         holdout_edges=graph_data.get('holdout_edge_indices'),
-        variables=variables if variables is not None else {},
+        variables=variables if variables is not None else [],
         config=graph_config
     )
     
@@ -604,9 +600,9 @@ async def compute_utilities(
             # Write sorted options with utilities
             sorted_results = results.get_sorted_results(reverse=True)
             for opt, util in sorted_results:
-                # Truncate long descriptions for readability
-                desc = opt.description[:80] + "..." if len(opt.description) > 80 else opt.description
-                f.write(f"{desc}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+                # Truncate long labels for readability
+                label = opt.label[:80] + "..." if len(opt.label) > 80 else opt.label
+                f.write(f"{label}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
     
     # Ensure all async tasks are completed before returning
     # This prevents the script from hanging due to pending tasks

@@ -21,7 +21,7 @@ class ExperimentOption:
     Keeps the structure simple - just id, description, and any additional fields.
     """
     id: Any
-    description: str
+    label: str = field(default_factory=lambda: f"Option {id}")
     _extra_fields: Dict[str, Any] = field(default_factory=dict, repr=False)
     
     def __post_init__(self):
@@ -31,7 +31,7 @@ class ExperimentOption:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to flat dictionary for serialization."""
-        result = {"id": self.id, "description": self.description}
+        result = {"id": self.id, "label": self.label}
         result.update(self._extra_fields)
         return result
     
@@ -40,15 +40,15 @@ class ExperimentOption:
         """Create from dictionary."""
         data = data.copy()
         option_id = data.pop("id")
-        description = data.pop("description")
-        return cls(id=option_id, description=description, _extra_fields=data)
+        option_label = data.pop("label", f"Option {option_id}")
+        return cls(id=option_id, label=option_label, _extra_fields=data)
     
     def __getitem__(self, key: str) -> Any:
         """Dict-like access for backwards compatibility."""
         if key == "id":
             return self.id
-        elif key == "description":
-            return self.description
+        elif key == "label":
+            return self.label
         else:
             return self._extra_fields.get(key)
     
@@ -56,8 +56,8 @@ class ExperimentOption:
         """Dict-like get method."""
         if key == "id":
             return self.id
-        elif key == "description":
-            return self.description
+        elif key == "label":
+            return self.label
         else:
             return self._extra_fields.get(key, default)
 
@@ -74,7 +74,7 @@ class PreferenceGraphResults:
     edges: Dict[str, Dict[str, Any]]  # Raw edge data from graph.export_data()
     training_edges: List[List[Any]]
     holdout_edges: Optional[List[List[Any]]] = None
-    variables: Dict[str, Variable] = field(default_factory=dict)
+    variables: List[Variable] = field(default_factory=list)
     config: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -84,7 +84,7 @@ class PreferenceGraphResults:
             "edges": self.edges,
             "training_edges": self.training_edges,
             "holdout_edges": self.holdout_edges,
-            "variables": {name: var.to_dict() for name, var in self.variables.items()},
+            "variables": [var.to_dict() for var in self.variables],
             **self.config
         }
     
@@ -94,17 +94,18 @@ class PreferenceGraphResults:
         options = [ExperimentOption.from_dict(opt) for opt in data["options"]]
         
         # Extract variable metadata
-        variables = {}
         if "variables" in data:
-            variables = {
-                name: Variable(
+            variables = [
+                Variable(
                     name=var_data["name"],
                     values=var_data["values"],
                     type=VariableType(var_data["type"]),
                     description=var_data.get("description", "")
                 )
-                for name, var_data in data["variables"].items()
-            }
+                for var_data in data["variables"]
+            ]
+        else:
+            variables = []
         
         # Extract config fields
         config_keys = ["compute_utilities_config", "create_agent_config", 
@@ -122,19 +123,22 @@ class PreferenceGraphResults:
     
     def get_variable(self, name: str) -> Optional[Variable]:
         """Get variable by name."""
-        return self.variables.get(name)
+        for var in self.variables:
+            if var.name == name:
+                return var
+        return None
     
-    def get_categorical_variables(self) -> Dict[str, Variable]:
+    def get_categorical_variables(self) -> List[Variable]:
         """Get all categorical variables (useful for finding factors)."""
         return {
-            name: var for name, var in self.variables.items()
+            var.name: var for var in self.variables
             if var.type == VariableType.CATEGORICAL
         }
     
     def get_numerical_variables(self) -> Dict[str, Variable]:
         """Get all numerical variables (useful for finding N, age, etc.)."""
         return {
-            name: var for name, var in self.variables.items()
+            var.name: var for var in self.variables
             if var.type == VariableType.NUMERICAL
         }
     

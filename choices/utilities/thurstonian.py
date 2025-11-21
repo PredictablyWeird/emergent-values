@@ -8,7 +8,7 @@ utility elicitation.
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Any, Optional, Set
+from typing import Dict, List, Tuple, Any, Optional, Set, Callable
 from .models import UtilityModel
 from ..utils import generate_responses, parse_responses_forced_choice
 import random
@@ -380,7 +380,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
     def __init__(
         self,
         unparseable_mode: str,
-        comparison_prompt_template: str,
+        comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
         system_message: str,
         with_reasoning: bool,
         num_epochs: int = 1000,
@@ -402,7 +402,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         
         Args:
             unparseable_mode: How to handle unparseable responses
-            comparison_prompt_template: Template for comparison prompts
+            comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
             system_message: System message for agents that accept a system message
             with_reasoning: Whether to use response parsing
             num_epochs: Number of epochs for optimization
@@ -422,7 +422,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         # Call parent class's __init__ with required arguments
         super().__init__(
             unparseable_mode=unparseable_mode,
-            comparison_prompt_template=comparison_prompt_template,
+            comparison_prompt_generator=comparison_prompt_generator,
             system_message=system_message,
             with_reasoning=with_reasoning
         )
@@ -459,8 +459,8 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             - option_utilities: Dict mapping each option ID to {'mean': float, 'variance': float}
             - metrics: Dict containing model metrics like log_loss and accuracy
         """
-        if self.comparison_prompt_template is None:
-            raise ValueError("comparison_prompt_template must be provided")
+        if self.comparison_prompt_generator is None:
+            raise ValueError("comparison_prompt_generator must be provided")
         
         # Calculate target number of edges and number of iterations
         N = len(graph.options)
@@ -493,7 +493,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         # Get responses for initial pairs
         preference_data, prompt_list, prompt_idx_to_key = graph.generate_prompts(
             initial_pairs,
-            self.comparison_prompt_template,
+            self.comparison_prompt_generator,
             include_flipped=self.include_flipped
         )
         
@@ -550,7 +550,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             # Get responses for additional pairs
             preference_data, prompt_list, prompt_idx_to_key = graph.generate_prompts(
                 additional_pairs,
-                self.comparison_prompt_template,
+                self.comparison_prompt_generator,
                 include_flipped=self.include_flipped
             )
             

@@ -1,7 +1,7 @@
 # models.py
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Callable
 import random
 
 class UtilityModel(ABC):
@@ -14,7 +14,7 @@ class UtilityModel(ABC):
     def __init__(
         self,
         unparseable_mode: str,
-        comparison_prompt_template: str,
+        comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
         system_message: str,
         with_reasoning: bool,
         **kwargs
@@ -24,9 +24,9 @@ class UtilityModel(ABC):
         
         Args:
             unparseable_mode: How to handle unparseable responses (can be "skip", "random", or "distribution")
-            comparison_prompt_template: Template for comparison prompts
+            comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
             system_message: System message for agents that accept a system message
-            with_reasoning: Whether to use response parsing for comparison_prompt_template_reasoning_default
+            with_reasoning: Whether to use response parsing
             **kwargs: Additional arguments specific to each utility model implementation
         """
         # Validate unparseable_mode
@@ -36,7 +36,7 @@ class UtilityModel(ABC):
         
         # Store required arguments as attributes
         self.unparseable_mode = unparseable_mode
-        self.comparison_prompt_template = comparison_prompt_template
+        self.comparison_prompt_generator = comparison_prompt_generator
         self.system_message = system_message
         self.with_reasoning = with_reasoning
 

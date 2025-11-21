@@ -10,7 +10,6 @@ from .experiment import (
     Experiment,
     ExperimentConfig,
     PromptConfig,
-    ResponseData,
 )
 
 from .variable import (
@@ -33,7 +32,6 @@ __all__ = [
     'Experiment',
     'ExperimentConfig',
     'PromptConfig',
-    'ResponseData',
     'Variable',
     'VariableType',
     'categorical',

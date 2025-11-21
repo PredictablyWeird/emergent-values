@@ -76,10 +76,10 @@ class PromptConfig:
 
     def generate_option_text(self, option: Dict[str, Any]) -> str:
         """Generate a text representation of an option."""
-        if "description" in option:
-            return option["description"]
+        if "text" in option:
+            return option["text"]
         else:
-            raise NotImplementedError("There is no default option text generator for options without a description field.")
+            raise NotImplementedError("There is no default option text generator for options without a text field.")
 
     def generate_prompt(self, option_A: Dict[str, Any], option_B: Dict[str, Any]) -> str:
         """Generate a prompt for a comparison between two options."""
@@ -122,7 +122,7 @@ class Experiment:
         self.name = self._sanitize_name(name)
         
         # Normalize variables to Variable objects
-        self.variables = self._normalize_variables(variables)
+        self.variables = variables
         
         self.prompt_config = prompt_config
         self.experiment_config = experiment_config
@@ -150,12 +150,11 @@ class Experiment:
         
         Returns list of option dicts with:
         - 'id': unique identifier (simple integer)
-        - 'description': text representation
-        - All variable key-value pairs
+        - All variable values
         """
         options = []
-        var_names = list(self.variables.keys())
-        var_values = [self.variables[name].values for name in var_names]
+        var_names = [var.name for var in self.variables]
+        var_values = [var.values for var in self.variables]
         
         for idx, combo in enumerate(itertools.product(*var_values)):
             option = dict(zip(var_names, combo))
@@ -200,11 +199,11 @@ class Experiment:
         
         if verbose:
             print(f"Generated {len(options)} options from variables:")
-            for var_name, var in self.variables.items():
-                print(f"  {var_name} ({var.type.value}): {len(var)} values")
+            for var in self.variables:
+                print(f"  {var.name} ({var.type.value}): {len(var.values)} values")
             print(f"\nExample options:")
             for opt in options[:3]:
-                print(f"  - {opt['description']}")
+                print(f"  - {opt['id']}")
         
         # Determine agent config key
         agent_config_key = self.experiment_config.agent_config_key
@@ -224,7 +223,7 @@ class Experiment:
         
         # Run compute_utilities (which will create the graph and save example prompt)
         results = await compute_utilities(
-            options_list=options,
+            options=options,
             model_key=self.experiment_config.model,
             create_agent_config_path=self.experiment_config.agent_config_path,
             create_agent_config_key=agent_config_key,
