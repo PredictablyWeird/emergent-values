@@ -9,7 +9,6 @@ import networkx as nx
 from ..utils import (
     create_agent,
     flatten_hierarchical_options,
-    convert_numpy,
     load_config,
     evaluate_holdout_set
 )
@@ -38,8 +37,8 @@ class PreferenceEdge:
         Initialize a preference edge.
         
         Args:
-            option_A: First option dictionary with at least {'id': Any, 'description': str}
-            option_B: Second option dictionary with at least {'id': Any, 'description': str}
+            option_A: First option dictionary with at least an 'id' field
+            option_B: Second option dictionary with at least an 'id' field
             probability_A: Probability of A being preferred over B
             aux_data: Optional dictionary of auxiliary data about this preference
         """
@@ -71,19 +70,15 @@ class PreferenceGraph:
     Handles creation of training/holdout edge sets and sampling strategies.
     """
     
-    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42, unique_fields: Optional[List[str]] = None):
+    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42):
         """
         Initialize a preference graph with training and holdout edge indices.
         
         Args:
             options: List of dictionaries, each containing at least:
-                    {'id': str/int, 'description': str}
+                    {'id': str/int}
             holdout_fraction: Fraction of edges to hold out for evaluation
             seed: Random seed for reproducibility
-            unique_fields: Optional list of field names. If specified, edges will be excluded
-                    where both options have the same values for all specified fields.
-                    For example, if unique_fields=['patient_data'], then edges between
-                    options with the same patient_data will be excluded.
         """
         self.options = options
         self.option_id_to_idx = {option['id']: idx for idx, option in enumerate(options)}
@@ -91,36 +86,6 @@ class PreferenceGraph:
         
         # Generate all possible edge indices as tuples
         all_edge_indices = list(itertools.combinations([opt['id'] for opt in options], 2))
-        
-        # Filter out edges where both options have the same values for unique_fields
-        if unique_fields:
-            original_count = len(all_edge_indices)
-            filtered_edges = []
-            for A_id, B_id in all_edge_indices:
-                option_A = self.options_by_id[A_id]
-                option_B = self.options_by_id[B_id]
-                
-                # Check if all unique_fields are the same in both options
-                should_exclude = True
-                for field in unique_fields:
-                    if field not in option_A or field not in option_B:
-                        # If field is missing in either option, don't exclude
-                        should_exclude = False
-                        break
-                    
-                    # Compare field values (using == for equality, which works for dicts, lists, etc.)
-                    if option_A[field] != option_B[field]:
-                        # Fields differ, so don't exclude this edge
-                        should_exclude = False
-                        break
-                
-                if not should_exclude:
-                    filtered_edges.append((A_id, B_id))
-            
-            all_edge_indices = filtered_edges
-            filtered_count = original_count - len(all_edge_indices)
-            if filtered_count > 0:
-                print(f"Filtered out {filtered_count} edges where both options have the same values for fields: {unique_fields}")
         
         # Split into training and holdout indices
         random.seed(seed)
@@ -204,15 +169,13 @@ class PreferenceGraph:
             'holdout_edge_indices': [list(edge) for edge in self.holdout_edge_indices]
         }
     
-    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_template: Union[str, Callable], include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
+    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str], include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
         """
         Generate prompts for the given edge indices in both original and flipped ordering.
         
         Args:
             edge_indices: List of (option_A_id, option_B_id) tuples
-            comparison_prompt_template: Either:
-                - Template string with {option_A} and {option_B} placeholders, OR
-                - Callable function that takes (option_A_dict, option_B_dict, direction) and returns a prompt string
+            comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
             include_flipped: Whether to include flipped prompts (Note: This should always be True; we only set it to False for demonstration purposes)
         Returns:
             Tuple containing:
@@ -244,19 +207,11 @@ class PreferenceGraph:
 
             for direction in directions:
                 if direction == 'original':
-                    option1 = option_A['description']
-                    option2 = option_B['description']
+                    option1, option2 = option_A, option_B
                 else:
-                    option1 = option_B['description']
-                    option2 = option_A['description']
+                    option1, option2 = option_B, option_A
                 
-                # Check if comparison_prompt_template is a callable function or a string template
-                if callable(comparison_prompt_template):
-                    # Pass full option dictionaries and direction to the function
-                    prompt = comparison_prompt_template(option_A, option_B, direction)
-                else:
-                    # Use string template formatting
-                    prompt = comparison_prompt_template.format(option_A=option1, option_B=option2)
+                prompt = comparison_prompt_generator(option1, option2)
                 
                 prompt_data = {
                     'prompt_idx': prompt_idx,
@@ -372,7 +327,7 @@ class PreferenceGraph:
 
 def _save_example_prompt(
     graph: PreferenceGraph, 
-    comparison_prompt_template: Union[str, Callable],
+    comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
     system_message: str,
     save_path: str
 ) -> None:
@@ -381,7 +336,7 @@ def _save_example_prompt(
     
     Args:
         graph: PreferenceGraph with edges
-        comparison_prompt_template: Template string or callable for generating prompts
+        comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
         system_message: System message to include in the example
         save_path: Directory to save the example prompt
     """
@@ -399,19 +354,7 @@ def _save_example_prompt(
     node_a = graph.options_by_id[node_a_id]
     node_b = graph.options_by_id[node_b_id]
     
-    # Generate the prompt text
-    if callable(comparison_prompt_template):
-        # Use custom prompt generator - it receives the full option dictionaries
-        prompt_text = comparison_prompt_template(node_a, node_b, 'original')
-    else:
-        # Use template-based generation
-        option_a_text = node_a['description']
-        option_b_text = node_b['description']
-        
-        prompt_text = comparison_prompt_template.format(
-            option_A=option_a_text,
-            option_B=option_b_text
-        )
+    prompt_text = comparison_prompt_generator(node_a, node_b)
     
     # Create full example with system message
     full_example = f"System Message:\n{system_message}\n\n{'='*60}\n\n{prompt_text}"
@@ -426,7 +369,8 @@ def _save_example_prompt(
 
 
 async def compute_utilities(
-    options_list: List[Dict[str, str]],
+    options: List[Dict[str, Any]],
+    comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
     model_key: Optional[str] = None,
     create_agent_config_path: Optional[str] = None,
     create_agent_config_key: Optional[str] = None,
@@ -434,11 +378,9 @@ async def compute_utilities(
     compute_utilities_config_path: Optional[str] = None,
     compute_utilities_config_key: Optional[str] = None,
     system_message: Optional[str] = None,
-    comparison_prompt_template: Optional[Union[str, Callable]] = None,
     with_reasoning: Optional[bool] = None,
     save_dir: str = "results",
     save_suffix: Optional[str] = None,
-    unique_fields: Optional[List[str]] = None,
     edge_filter: Optional[Callable[[Dict[str, Any], Dict[str, Any]], bool]] = None,
     variables: Optional[Dict[str, Any]] = None
 ) -> ExperimentResults:
@@ -446,7 +388,8 @@ async def compute_utilities(
     Compute utilities for a set of options using a specified utility model.
     
     Args:
-        options_list: List of options or dictionary of option lists
+        options: List of option dictionaries with at least an 'id' field
+        comparison_prompt_generator: Function that takes two option dictionaries and returns a prompt string
         model_key: Key of the model in models.yaml
         create_agent_config_path: Path to create_agent.yaml
         create_agent_config_key: Key to use in create_agent.yaml
@@ -454,13 +397,9 @@ async def compute_utilities(
         compute_utilities_config_path: Path to compute_utilities.yaml
         compute_utilities_config_key: Key to use in compute_utilities.yaml
         system_message: Optional system message for the agent. If provided, overrides the value in compute_utilities.yaml
-        comparison_prompt_template: Optional template for comparison prompts (string or callable). If provided, overrides the value in compute_utilities.yaml
         with_reasoning: Whether to use reasoning-based response parsing. If provided (True/False), overrides the config value
         save_dir: Directory to save results
         save_suffix: Suffix for saved files
-        unique_fields: Optional list of field names. If specified, edges will be excluded where both options
-                have the same values for all specified fields. For example, if unique_fields=['patient_data'],
-                then edges between options with the same patient_data will be excluded.
         edge_filter: Optional function returning True to keep edge, False to exclude.
                 Called with (option_a, option_b) dictionaries.
         variables: Optional dictionary mapping variable names to Variable objects. Used to preserve
@@ -486,13 +425,7 @@ async def compute_utilities(
     elif compute_utilities_arguments.get('with_reasoning') is None:
         compute_utilities_arguments['with_reasoning'] = False  # default
 
-    if comparison_prompt_template is not None:
-        compute_utilities_arguments['comparison_prompt_template'] = comparison_prompt_template
-    elif compute_utilities_arguments.get('comparison_prompt_template') is None:
-        raise ValueError(
-            "comparison_prompt_template must be provided either as an argument or in the config. "
-            "When using the Experiment class, this is automatically set from PromptConfig.template"
-        )
+    compute_utilities_arguments['comparison_prompt_generator'] = comparison_prompt_generator
 
     # Update the main config with the potentially modified arguments
     compute_utilities_config['compute_utilities_arguments'] = compute_utilities_arguments
@@ -509,14 +442,6 @@ async def compute_utilities(
     # Process options
     if isinstance(options_list, dict):
         options_list = flatten_hierarchical_options(options_list)
-    
-    # Check if options_list is already a list of dictionaries with 'id' and 'description'
-    if options_list and isinstance(options_list[0], dict) and 'id' in options_list[0] and 'description' in options_list[0]:
-        # Options are already structured, use them as-is (preserving any additional fields)
-        options = options_list
-    else:
-        # Options are a list of strings, convert to structured format
-        options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
     
     # Get utility model class
     utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
@@ -538,7 +463,7 @@ async def compute_utilities(
     # Required arguments from compute_utilities_arguments
     required_args = {
         'unparseable_mode': compute_utilities_arguments.get('unparseable_mode', 'skip'),
-        'comparison_prompt_template': compute_utilities_arguments['comparison_prompt_template'],
+        'comparison_prompt_generator': compute_utilities_arguments['comparison_prompt_generator'],
         'system_message': compute_utilities_arguments['system_message'],
         'with_reasoning': compute_utilities_arguments['with_reasoning']
     }
@@ -551,16 +476,13 @@ async def compute_utilities(
     
     # Get preference graph arguments from config
     preference_graph_arguments = compute_utilities_config.get('preference_graph_arguments', {})
-    # Use unique_fields from parameter if provided, otherwise from config
-    unique_fields_param = unique_fields if unique_fields is not None else preference_graph_arguments.get('unique_fields', None)
     holdout_fraction = preference_graph_arguments.get('holdout_fraction', 0.0)
     holdout_seed = preference_graph_arguments.get('holdout_seed', 42)
-    
+
     graph = PreferenceGraph(
         options=options,
         holdout_fraction=holdout_fraction,
-        seed=holdout_seed,
-        unique_fields=unique_fields_param
+        seed=holdout_seed
     )
     
     # Apply custom edge filter if provided
@@ -586,7 +508,7 @@ async def compute_utilities(
     if save_dir:
         _save_example_prompt(
             graph=graph, 
-            comparison_prompt_template=comparison_prompt_template,
+            comparison_prompt_generator=comparison_prompt_generator,
             system_message=compute_utilities_arguments['system_message'],
             save_path=save_dir
         )
@@ -600,7 +522,7 @@ async def compute_utilities(
         agent=agent,
         utility_model=utility_model,
         utilities=utilities,
-        comparison_prompt_template=compute_utilities_arguments['comparison_prompt_template'],
+        comparison_prompt_generator=compute_utilities_arguments['comparison_prompt_generator'],
         system_message=compute_utilities_arguments['system_message'],
         with_reasoning=compute_utilities_arguments['with_reasoning'],
         K=compute_utilities_arguments.get('K', 10)
@@ -610,12 +532,12 @@ async def compute_utilities(
     # Create a serializable version of the config (convert callable to string)
     serializable_config = copy.deepcopy(compute_utilities_config)
     if 'compute_utilities_arguments' in serializable_config:
-        if 'comparison_prompt_template' in serializable_config['compute_utilities_arguments']:
-            template = serializable_config['compute_utilities_arguments']['comparison_prompt_template']
-            if callable(template):
+        if 'comparison_prompt_generator' in serializable_config['compute_utilities_arguments']:
+            generator = serializable_config['compute_utilities_arguments']['comparison_prompt_generator']
+            if callable(generator):
                 # Replace callable with a string representation
-                func_name = getattr(template, '__name__', 'unknown')
-                serializable_config['compute_utilities_arguments']['comparison_prompt_template'] = f"<callable: {func_name}>"
+                func_name = getattr(generator, '__name__', 'unknown')
+                serializable_config['compute_utilities_arguments']['comparison_prompt_generator'] = f"<callable: {func_name}>"
     
     # Create PreferenceGraphResults
     graph_config = {

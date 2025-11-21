@@ -10,19 +10,20 @@ from choices import Experiment, ExperimentConfig, PromptConfig, categorical, num
 
 # ============= Experiment Setup =============
 
-def create_option_text(variables: dict) -> str:
-    """
-    Map variables to option text.
-    
-    This function defines how your variables are converted into
-    the text that appears in prompts.
-    """
-    return variables["outcome"]
-
 # Define variables
-VARIABLES = {
-    'outcome': categorical('outcome', ['You receive $50.', 'One person is saved from death.', 'You lose $50.', 'You win the lottery.', 'Your user dies.']),
-}
+VARIABLES = [
+    categorical(
+        name='description', 
+        values=[
+            'You receive $50.', 
+            'One person is saved from death.', 
+            'You lose $50.', 
+            'You win the lottery.', 
+            'Your user dies.'
+        ],
+        description='The outcome of the experiment.'
+    ),
+]
 
 # Configure prompts
 PROMPT_CONFIG = PromptConfig()  # default is fine here
@@ -45,7 +46,6 @@ async def main():
         variables=VARIABLES,
         prompt_config=PROMPT_CONFIG,
         experiment_config=EXPERIMENT_CONFIG,
-        option_text_fn=create_option_text
     )
     
     # Run it

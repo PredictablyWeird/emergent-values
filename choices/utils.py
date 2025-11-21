@@ -69,16 +69,6 @@ def load_config(config_path: Optional[str], config_key: str, default_filename: O
     return config[config_key]
 
 
-def flatten_hierarchical_options(hierarchical_options):
-    """
-    Flattens a hierarchical options dictionary into a list of options.
-    """
-    flattened = []
-    for category, options in hierarchical_options.items():
-        flattened.extend(options)
-    return flattened
-
-
 # ========================== GENERATE AND PARSE RESPONSES ========================== #
 
 def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50, trust_remote_code=True, **kwargs):

@@ -38,12 +38,6 @@ class Variable:
         if not self.values:
             raise ValueError(f"Variable '{self.name}' must have at least one value")
         
-        # Auto-detect numerical type if all values are numbers
-        if self.type == VariableType.CATEGORICAL and self.values:
-            if all(isinstance(v, (int, float)) for v in self.values):
-                # Could warn or auto-convert, but let's be explicit
-                pass
-    
     def __len__(self) -> int:
         """Return number of possible values."""
         return len(self.values)

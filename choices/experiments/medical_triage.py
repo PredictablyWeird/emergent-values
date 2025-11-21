@@ -423,7 +423,7 @@ async def run_triage_experiment(
         experiment_config=experiment_config,
         option_text_fn=option_text_fn,  # For readable descriptions
         custom_prompt_generator=prompt_generator,  # For actual prompts
-        unique_fields=['patient_id']  # Don't compare same patient with different factors
+        edge_filter=lambda opt_a, opt_b: opt_a.get('patient_id') != opt_b.get('patient_id')   # Don't compare same patient with different factors
     )
     
     # Run it
