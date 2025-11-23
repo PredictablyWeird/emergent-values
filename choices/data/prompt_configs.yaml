@@ -85,7 +85,24 @@ prompt_configs:
   nationality_deaths:
     factor: nationality
     measure: deaths
+
+  nationality_terminal_illness:
+    factor: nationality
+    measure: terminal_illness
+
+  base_nationality_terminal_illness_small:
+    factor: nationality
+    measure: terminal_illness
+    setup: base
+    system_prompt: none
+    N_values: small
   
+  base_nationality_terminal_illness:
+    factor: nationality
+    measure: terminal_illness
+    setup: base
+    system_prompt: none
+
   nationality_illness_hospital:
     factor: nationality
     measure: terminal_illness

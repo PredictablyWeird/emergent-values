@@ -1086,3 +1086,194 @@ class LiteLLMAgent:
             print(f"Number of generic errors: {counts['errors']}")
 
         return [results[i] for i in range(len(messages))]
+
+
+
+
+# Uses the OpenAI client and makes sure to call completions rather than chat. Mostly a copy of LiteLLMAgent
+class BaseAgent:
+    def __init__(
+        self,
+        model: str,
+        base_url:str,
+        api_key:str,
+        temperature: float = 0.0,
+        max_tokens: int = 2048,
+        concurrency_limit: int = 100,
+        accepts_system_message: bool = True,
+        max_retries: int = 5,
+        base_timeout: float = 5.0,
+        base_delay: float = 1.0,
+        max_delay: float = 10.0,
+        use_jitter: bool = True,
+        treat_as_chat_model: bool = False,
+        extra_body: Optional[Dict] = None
+    ):
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.concurrency_limit = concurrency_limit
+        self.accepts_system_message = accepts_system_message
+        self.extra_body = extra_body
+
+        self.max_retries = max_retries
+        self.base_timeout = base_timeout
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.use_jitter = use_jitter
+
+        self.treat_as_chat_model = treat_as_chat_model
+        
+        # Initialize OpenAI client (which handles various providers)
+        self.client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+
+    def _messages_to_prompt(self, messages: List[Dict]) -> str:
+        """Convert messages list to a single prompt string."""
+
+        if self.treat_as_chat_model:
+            return messages 
+
+
+        error_msg = "base model should only contain a user message (which gets converted to raw text).\nIf you want to use the base model as a chat model try treat_as_chat_model=True"
+
+        assert len(messages) == 1, error_msg
+
+        msg = messages[0]
+
+        role = msg['role']
+        assert role == 'user', error_msg
+
+        content = msg['content']
+        return content 
+
+    async def async_completions(
+        self,
+        messages: List[List[Dict]],
+        verbose: bool = True,
+        **kwargs
+    ) -> List[str]:
+        """
+        Returns a list of LLM responses, in order.
+        Uses a semaphore to limit concurrency, and tqdm_asyncio for progress.
+        """
+
+        semaphore = asyncio.Semaphore(self.concurrency_limit)
+        counts = {"timeouts": 0, "errors": 0}
+        results = {}
+
+        async def process_message(message_idx: int):
+            """
+            Attempts to process a single message up to `max_retries` times.
+            On generic exceptions, sleeps with exponential backoff and optional jitter.
+            On timeout, doubles the request timeout without sleeping.
+            """
+            message = messages[message_idx]
+            # Convert messages to prompt for completions endpoint
+            prompt = self._messages_to_prompt(message)
+
+            current_timeout = self.base_timeout
+            retry_delay = self.base_delay
+            response = None
+
+            for attempt in range(self.max_retries):
+                # Acquire the semaphore before making the LLM call
+                async with semaphore:
+                    # if verbose:
+                    #     print(
+                    #         f"[Attempt {attempt+1}/{self.max_retries}] "
+                    #         f"Message index {message_idx}, timeout={current_timeout:.1f}s"
+                    #     )
+
+                    try:
+
+
+                        if self.treat_as_chat_model:
+                            completion_kwargs = {
+                                "model": self.model,
+                                "messages": prompt,
+                                "max_tokens": self.max_tokens,
+                                "temperature": self.temperature,
+                                "timeout": current_timeout
+                            }
+                            # Add extra_body if it exists (for OpenRouter reasoning parameter, etc.)
+                            if self.extra_body:
+                                completion_kwargs["extra_body"] = self.extra_body
+                            
+                            completion_res = await self.client.chat.completions.create(**completion_kwargs)
+
+                        else:
+                            completion_kwargs = {
+                                "model": self.model,
+                                "prompt": prompt,
+                                "max_tokens": self.max_tokens,
+                                "temperature": self.temperature,
+                                "timeout": current_timeout
+                            }
+                            # Add extra_body if it exists (for OpenRouter reasoning parameter, etc.)
+                            if self.extra_body:
+                                completion_kwargs["extra_body"] = self.extra_body
+                            
+                            completion_res = await self.client.completions.create(**completion_kwargs)
+                    except asyncio.TimeoutError:
+                        counts["timeouts"] += 1
+
+                        if verbose:
+                            print(
+                                f"[Timeout] Attempt {attempt+1}/{self.max_retries} "
+                                f"for message index {message_idx}. Timed out after {current_timeout:.1f}s."
+                            )
+                        if attempt == self.max_retries - 1:
+                            response = None  # no more retries
+                            if verbose:
+                                print(f"Max retries (timeouts) reached for message index {message_idx}.")
+                        else:
+                            current_timeout *= 2.0
+
+                        continue  # next attempt
+
+                    except Exception as e:
+                        counts["errors"] += 1
+
+                        if verbose:
+                            print(
+                                f"[Error] Attempt {attempt+1}/{self.max_retries} "
+                                f"for message index {message_idx}: {e}"
+                            )
+                        if attempt == self.max_retries - 1:
+                            response = None
+                            if verbose:
+                                print(f"Max retries (errors) reached for message index {message_idx}.")
+                        else:
+                            # Sleep with exponential backoff
+                            sleep_for = retry_delay
+                            if self.use_jitter:
+                                sleep_for += random.uniform(0, 1)
+                            if verbose:
+                                print(f"Sleeping {sleep_for:.1f}s before retry (error backoff)...")
+                            await asyncio.sleep(sleep_for)
+                            retry_delay = min(retry_delay * 2.0, self.max_delay)
+
+                        continue  # next attempt
+
+                    # Success: parse the response (using .text for completions, not .message.content)
+                    response = completion_res.choices[0].text.strip()
+                    break  # done with retries
+
+            results[message_idx] = response
+
+        # Create a task for each message
+        tasks = [process_message(i) for i in range(len(messages))]
+
+        # Use tqdm_asyncio to track progress as tasks finish
+        # You can also set `leave=False` or other tqdm arguments as needed
+        for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="LLM calls"):
+            await coro
+
+        if verbose:
+            print(f"Number of timeouts: {counts['timeouts']}")
+            print(f"Number of generic errors: {counts['errors']}")
+
+        return [results[i] for i in range(len(messages))]
