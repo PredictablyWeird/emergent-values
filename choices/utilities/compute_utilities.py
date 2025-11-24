@@ -419,10 +419,8 @@ async def compute_utilities(
     compute_utilities_arguments = compute_utilities_config.get('compute_utilities_arguments', {})
 
     # Override config values with provided arguments if they exist; if not provided anywhere, use default values
-    if system_message is not None:
-        compute_utilities_arguments['system_message'] = system_message
-    elif compute_utilities_arguments.get('system_message') is None:
-        compute_utilities_arguments['system_message'] = "You are a helpful assistant."  # default
+    compute_utilities_arguments['system_message'] = system_message #default is None
+
     
     if with_reasoning is not None:
         compute_utilities_arguments['with_reasoning'] = with_reasoning

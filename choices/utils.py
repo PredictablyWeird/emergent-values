@@ -9,7 +9,7 @@ import numpy as np
 import random
 from typing import List, Dict, Any, Optional, Union, Callable
 from pathlib import Path
-from .llm_agent import LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
+from .llm_agent import BaseAgent, LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
 import re
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -142,6 +142,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     extra_body = model_config.get('extra_body', None)  # Read extra_body from model config (for reasoning, etc.)
     
     # Get API key from environment variables
+
+
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
         api_key_map = {
             'openai': 'OPENAI_API_KEY',
@@ -164,6 +166,32 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             base_timeout=kwargs.get('base_timeout', 5),
             extra_body=extra_body,
         )
+    elif model_type.startswith("base_"):
+        if model_type.endswith("openrouter"):
+            base_url="https://openrouter.ai/api/v1"
+            api_key=os.getenv("OPENROUTER_API_KEY")
+        elif model_type.endswith("fireworks"):
+            base_url="https://api.fireworks.ai/inference/v1"
+            api_key=os.getenv("FIREWORKS_API_KEY")
+
+        else:
+            raise ValueError(f"Unknown model type: {model_type}. base model must be one of [base_openrouter', 'base_fireworks'].")
+        return BaseAgent(
+            model=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            concurrency_limit=concurrency_limit,
+            accepts_system_message=accepts_system_message,
+            base_timeout=kwargs.get('base_timeout', 5),
+            extra_body=extra_body,
+        )
+
+
+
+        
+
     elif model_type == 'huggingface':
         return HuggingFaceAgent(
             model=model_config['path'],
@@ -192,7 +220,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             tokenizer_path=model_config.get('tokenizer_path')
         )
     else:
-        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai', 'openrouter'].")
+        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai', 'openrouter', 'base_openrouter', 'base_fireworks'].")
 
 
 
@@ -585,7 +613,7 @@ async def generate_responses(agent, prompts, system_message=None, K=10, timeout=
     # Duplicate messages K times to get K completions for each prompt
     messages_k = messages * K
     
-    if isinstance(agent, LiteLLMAgent):
+    if isinstance(agent, LiteLLMAgent) or isinstance(agent, BaseAgent):
         responses = await agent.async_completions(messages_k, base_timeout=timeout, verbose=verbose)
     else:
         responses = agent.completions_batch(messages_k)
@@ -667,7 +695,7 @@ async def evaluate_holdout_set(
     
     return holdout_metrics
 
-async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFaceAgent, HuggingFaceAgentLogitsPrediction, vLLMAgent], messages=None, timeout=5, verbose=True, structured_json: str = None):
+async def generate_responses_from_messages(agent: Union[BaseAgent, LiteLLMAgent, HuggingFaceAgent, HuggingFaceAgentLogitsPrediction, vLLMAgent], messages=None, timeout=5, verbose=True, structured_json: str = None):
     """
     Generates responses from the model for a list of prompts asynchronously.
 
@@ -681,7 +709,7 @@ async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFac
         A dictionary mapping prompt indices to their generated responses.
     """
     
-    if isinstance(agent, LiteLLMAgent):
+    if isinstance(agent, LiteLLMAgent) or isinstance(agent, BaseAgent):
         responses = await agent.async_completions(messages, timeout=timeout, verbose=verbose)
     elif isinstance(agent, HuggingFaceAgentLogitsPrediction):
         responses = agent.completions(messages)
