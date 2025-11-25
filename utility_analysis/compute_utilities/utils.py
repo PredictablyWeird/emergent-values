@@ -112,17 +112,17 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
     extra_body = model_config.get('extra_body', None)  # Read extra_body from model config (for reasoning, etc.)
     
+
     # Get API key from environment variables
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
         api_key_map = {
-            'openai': 'OPENAI_API_KEY:',
+            'openai': 'OPENAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
             'gdm': 'GEMINI_API_KEY',
             'xai': 'XAI_API_KEY',
             'togetherai': 'TOGETHER_AI_API_KEY',
             'openrouter': 'OPENROUTER_API_KEY'
         }
-        pdb.set_trace()
         env_var_name = api_key_map[model_type]
         api_key = os.getenv(env_var_name)
         if api_key is None:
@@ -189,6 +189,7 @@ def parse_responses_forced_choice(
     Also prints counts for longer_than_expected and unparseable responses.
     """
     parsed_results = {}
+    reasoning_results = {}
     counts = {
         'longer_than_expected': 0,
         'unparseable': 0
@@ -207,7 +208,8 @@ def parse_responses_forced_choice(
     # Example: if choices = ['X','Y'], pattern = r'Answer:\s*([X|Y])'
     pattern_str = '|'.join(re.escape(c) for c in choices)
     reasoning_pattern = re.compile(rf'Answer:\s*({pattern_str})', re.IGNORECASE)
-
+    reason_text_pattern = re.compile(r'^(.*?)(?=\n*(?:Final answer:)?\n*Answer:)', re.DOTALL | re.IGNORECASE)
+    reasoning_text_later_pattern = re.compile(r'Reasoning:\s+(.*)', re.DOTALL | re.IGNORECASE)
     # Precompile patterns for non-reasoning mode
     choice_patterns = [re.compile(rf'(?:^|[^\w])({re.escape(c)})(?:[^\w]|$)') for c in choices]
 
@@ -218,29 +220,38 @@ def parse_responses_forced_choice(
             continue
 
         parsed_list = []
+        reasoning_list = []
         for response in responses:
             # If a single response is None (e.g., final timeout), parse as 'unparseable'.
             if response is None:
                 parsed_list.append('unparseable')
                 counts['unparseable'] += 1
                 continue
-
             if with_reasoning:
                 # Reasoning mode: must find "Answer: X" or "Answer: Y".
                 answer_match = reasoning_pattern.search(response)
+                # Extract the reasoning part
+                reasoning_match = reasoning_text_later_pattern.search(response)
+                if reasoning_match:
+                    reasoning_text = reasoning_match.group(1).strip()
                 if answer_match:
                     matched = answer_match.group(1)
                     # Normalize the matched choice by matching it to one of choices[0] or choices[1].
                     if matched.upper() == choices[0].upper():
                         parsed_list.append(choices[0])
+                        reasoning_list.append(reasoning_text)
                     elif matched.upper() == choices[1].upper():
                         parsed_list.append(choices[1])
+                        reasoning_list.append(reasoning_text)
                     else:
                         counts['unparseable'] += 1
                         parsed_list.append('unparseable')
+                        reasoning_list.append('unparseable')
                 else:
                     counts['unparseable'] += 1
                     parsed_list.append('unparseable')
+                    reasoning_list.append('unparseable')
+
             else:
                 # Non-reasoning mode
                 # First check if response is exactly one of the choices
@@ -263,13 +274,13 @@ def parse_responses_forced_choice(
                         parsed_list.append('unparseable')
 
         parsed_results[prompt_idx] = parsed_list
+        reasoning_results[prompt_idx] = reasoning_list
 
     if verbose:
         print(f"Number of responses longer than expected: {counts['longer_than_expected']}")
         print(f"Number of unparseable responses: {counts['unparseable']}")
 
-    return parsed_results
-
+    return parsed_results, reasoning_results
 
 async def parse_responses_forced_choice_freeform(
     raw_results,
@@ -529,7 +540,6 @@ async def generate_responses(agent, prompts, system_message=None, K=10, timeout=
         responses = await agent.async_completions(messages_k, base_timeout=timeout, verbose=verbose)
     else:
         responses = agent.completions_batch(messages_k)
-    
     # Reshape responses into groups of K for each prompt
     num_prompts = len(prompts)
     responses_by_prompt = {}
@@ -583,11 +593,12 @@ async def evaluate_holdout_set(
     )
     
     # Parse responses and process them into preference data
-    parsed_responses = parse_responses_forced_choice(holdout_responses, with_reasoning=with_reasoning)
+    parsed_responses, reasoning_results = parse_responses_forced_choice(holdout_responses, with_reasoning=with_reasoning)
     processed_preference_data = utility_model.process_responses(
         graph=graph,
         responses=holdout_responses,
         parsed_responses=parsed_responses,
+        reasoning_results=reasoning_results,
         prompt_idx_to_key=holdout_prompt_idx_to_key
     )
     
@@ -606,6 +617,7 @@ async def evaluate_holdout_set(
     print(f"Accuracy: {holdout_metrics['accuracy'] * 100:.2f}%")
     
     return holdout_metrics
+
 
 async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFaceAgent, HuggingFaceAgentLogitsPrediction, vLLMAgent], messages=None, timeout=5, verbose=True, structured_json: str = None):
     """

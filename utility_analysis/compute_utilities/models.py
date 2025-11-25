@@ -1,6 +1,7 @@
 # models.py
 
 from abc import ABC, abstractmethod
+import pdb
 from typing import Dict, List, Tuple, Any, Optional
 import random
 
@@ -85,6 +86,7 @@ class UtilityModel(ABC):
         graph: 'PreferenceGraph',
         responses: Dict[int, List[str]],
         parsed_responses: Dict[int, List[str]],
+        reasoning_results: Dict[int, List[str]],
         prompt_idx_to_key: Dict[int, Tuple[Any, Any, str]],
     ) -> List[Dict]:
         """
@@ -100,6 +102,7 @@ class UtilityModel(ABC):
             graph: The PreferenceGraph containing options and edges
             responses: Dict mapping prompt_idx to list of K raw responses
             parsed_responses: Dict mapping prompt_idx to list of K parsed responses ('A', 'B', or 'unparseable')
+            reasoning_results: Dict mapping prompt_idx to list of K reasoning results
             prompt_idx_to_key: Mapping from prompt index to (option_A_id, option_B_id, direction)
 
         Returns:
@@ -115,7 +118,7 @@ class UtilityModel(ABC):
         for prompt_idx, response_list in responses.items():
             A_id, B_id, direction = prompt_idx_to_key[prompt_idx]
             parsed_list = parsed_responses[prompt_idx]  # The K parsed responses
-
+            reasoning_list = reasoning_results[prompt_idx]  # The K reasoning results
             # Use the orientation as-is (A_id, B_id)
             pair_key = (A_id, B_id)
             if pair_key not in pair_data:
@@ -125,17 +128,20 @@ class UtilityModel(ABC):
                     'original_responses': [],
                     'flipped_responses': [],
                     'original_parsed': [],
-                    'flipped_parsed': []
-                }
+                    'flipped_parsed': [],
+                    'original_reasoning': [],
+                    'flipped_reasoning': [],
 
+                }
             # We store the raw and parsed responses in separate buckets
             if direction == 'original':
                 pair_data[pair_key]['original_responses'].extend(response_list)
                 pair_data[pair_key]['original_parsed'].extend(parsed_list)
+                pair_data[pair_key]['original_reasoning'].extend(reasoning_list)
             else:  # 'flipped'
                 pair_data[pair_key]['flipped_responses'].extend(response_list)
                 pair_data[pair_key]['flipped_parsed'].extend(parsed_list)
-
+                pair_data[pair_key]['flipped_reasoning'].extend(reasoning_list)
         # Now, we convert each pair's responses into a probability P(A)
         preference_data = []
         rng = random.Random(42)  # or some other seed for stable 'random' in "random" mode
@@ -213,6 +219,8 @@ class UtilityModel(ABC):
                         'flipped_responses': data['flipped_responses'],
                         'original_parsed': data['original_parsed'],
                         'flipped_parsed': data['flipped_parsed'],
+                        'original_reasoning': data['original_reasoning'],
+                        'flipped_reasoning': data['flipped_reasoning'],
                         'unparseable_mode': self.unparseable_mode
                     }
                 }

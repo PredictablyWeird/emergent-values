@@ -1,5 +1,6 @@
 import asyncio
 import json
+import pdb
 import time
 import numpy as np
 import random
@@ -23,7 +24,7 @@ from .utils import (
     evaluate_holdout_set
 )
 from .llm_agent import LiteLLMAgent, HuggingFaceAgent, LLMAgent
-from .templates import comparison_prompt_template_default, comparison_prompt_template_reasoning_default
+from .templates import comparison_prompt_template_default, comparison_prompt_template_reasoning_default, comparison_prompt_template_reasoning_first
 from .models import UtilityModel
 import yaml
 from abc import ABC, abstractmethod
@@ -392,7 +393,7 @@ async def compute_utilities(
         compute_utilities_arguments['comparison_prompt_template'] = comparison_prompt_template
     elif compute_utilities_arguments.get('comparison_prompt_template') is None:
         wr = compute_utilities_arguments['with_reasoning']
-        default_template = comparison_prompt_template_reasoning_default if wr else comparison_prompt_template_default
+        default_template = comparison_prompt_template_reasoning_first if wr else comparison_prompt_template_default
         compute_utilities_arguments['comparison_prompt_template'] = default_template
 
     # Update the main config with the potentially modified arguments

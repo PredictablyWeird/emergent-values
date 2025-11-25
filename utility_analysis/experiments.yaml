@@ -93,11 +93,11 @@ exchange_ratesx:
     save_suffix: "<model_key>"
     category: "ais"
     measure: "values"
-    with_reasoning: false
+    with_reasoning: true
     compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
     compute_utilities_config_key: "thurstonian_active_learning_k5"
     create_agent_config_path: "../../compute_utilities/create_agent.yaml"
-    create_agent_config_key: "default"
+    create_agent_config_key: "default_with_reasoning"
 
 
 exchange_rates1_sample:
@@ -121,7 +121,7 @@ exchange_rates1:
   arguments:
     model_key: "<model_key>"
     create_agent_config_path: "../../compute_utilities/create_agent.yaml"
-    create_agent_config_key: "default"
+    create_agent_config_key: "default_with_reasoning"
     save_dir: "results/<model_key>"
     save_suffix: "<model_key>"
     with_reasoning: false
@@ -129,6 +129,7 @@ exchange_rates1:
     compute_utilities_config_key: "thurstonian_active_learning_k5"
     category: "countries"
     measure: "terminal_illness"
+
 
 exchange_rates1_alt:
   script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
@@ -296,6 +297,37 @@ exchange_rates11:
     category: "ethnicities"
     measure: "terminal_illness"
 
+# Not included in original paper
+exchange_rates12:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: true
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "gender"
+    measure: "terminal_illness"
+
+
+exchange_rates_reasoning_first:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    category: "countries"
+    measure: "terminal_illness"
+    with_reasoning: true
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
 
 # ============= Expected Utility Experiments ============= #
 

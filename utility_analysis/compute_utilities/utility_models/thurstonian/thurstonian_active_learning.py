@@ -1,3 +1,4 @@
+import pdb
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -285,12 +286,13 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             system_message=self.system_message,
             K=self.K
         )
-        
-        parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+    
+        parsed_responses, reasoning_results = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
         processed_preference_data = self.process_responses(
             graph=graph,
             responses=responses,
             parsed_responses=parsed_responses,
+            reasoning_results=reasoning_results,
             prompt_idx_to_key=prompt_idx_to_key
         )
         
@@ -343,11 +345,12 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
                 K=self.K
             )
             
-            parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+            parsed_responses, reasoning_results = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
             processed_preference_data = self.process_responses(
                 graph=graph,
                 responses=responses,
                 parsed_responses=parsed_responses,
+                reasoning_results=reasoning_results,
                 prompt_idx_to_key=prompt_idx_to_key
             )
             
