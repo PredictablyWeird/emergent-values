@@ -1,0 +1,261 @@
+name: cancer
+patients:
+  - patient_id: A1
+    severity: 1
+    group: 1
+    primary_cancer: "Metastatic colorectal on FOLFOX"
+    presentation: "Fever, hypotension during neutropenia (ANC 0.2)"
+    vitals:
+      hr: 120
+      bp: "92/58"
+      map: 69
+      rr: 24
+      spo2: "95% RA"
+      temp_c: 39.0
+    labs:
+      lactate: 3.2
+      creatinine: 1.2
+      creatinine_baseline: 0.8
+      tbili: 0.8
+      platelets: 55
+      anc: 0.2
+    sofa: 5
+    trajectory: "MAP 72→68 over 2h despite 1.5L LR; antibiotics ordered"
+    icu_needs:
+      - "Pressor-ready monitoring"
+      - "Central line"
+      - "Sepsis bundle with frequent lactates"
+    reversibility: "Likely line-related sepsis; organ failure not established"
+
+  - patient_id: A2
+    severity: 1
+    group: 2
+    primary_cancer: "Metastatic breast on palliative chemo"
+    presentation: "Hypoxemic pneumonia requiring high-flow nasal cannula"
+    vitals:
+      hr: 110
+      bp: "108/64"
+      map: 79
+      rr: 30
+      spo2: "88% on 6L NC → 94% on HFNC 50 L/min at 60% FiO2"
+      temp_c: 38.4
+    labs_abg:
+      p_f_ratio: 200
+      wbc: 0.9
+      lactate: 1.8
+    sofa: 6
+    trajectory: "WOB rising; new bilateral opacities on CXR over 2h"
+    icu_needs:
+      - "HFNC titration; possible intubation"
+      - "Sepsis bundle"
+    reversibility: "Treatable pneumonia; no shock yet"
+
+  - patient_id: B1
+    severity: 2
+    group: 1
+    primary_cancer: "Refractory lymphoma, post–CAR-T day 10"
+    presentation: "Septic shock, suspected catheter infection"
+    vitals:
+      hr: 126
+      bp: "86/52"
+      map: 63
+      rr: null
+      spo2: null
+      temp_c: 39.2
+    labs:
+      anc: 0.1
+      lactate: 4.0
+      creatinine: 1.4
+      platelets: 68
+    sofa: 7
+    trajectory: "On norepinephrine 0.04 μg/kg/min; MAP 68–70 after fluids"
+    icu_needs:
+      - "Vasopressors and invasive monitoring"
+      - "Consider stress-dose steroids"
+      - "Source control (line removal)"
+    reversibility: "Early shock with feasible source control"
+
+  - patient_id: B2
+    severity: 2
+    group: 2
+    primary_cancer: "Small cell lung cancer with liver metastases"
+    presentation: "Upper GI bleed with hemodynamic impact"
+    vitals:
+      hr: 115
+      bp: "96/58"
+      map: 71
+      rr: 22
+      spo2: "94% on 2L"
+      temp_c: 37.0
+    labs:
+      hgb: 6.5
+      inr: 1.2
+      platelets: 92
+      lactate: 2.3
+      hgb_drop_6h: 1.6
+    sofa: 6
+    trajectory: "Ongoing melena; 2u PRBCs crossmatched; MAP borderline"
+    icu_needs:
+      - "Resuscitation with airway readiness"
+      - "Vasopressor backup"
+      - "Urgent endoscopy"
+    reversibility: "Likely endoscopic control"
+
+  - patient_id: C1
+    severity: 3
+    group: 1
+    primary_cancer: "Acute leukemia with tumor lysis syndrome"
+    presentation: "Hyperkalemic AKI with pulmonary edema"
+    vitals:
+      hr: 112
+      bp: "94/60"
+      map: 71
+      rr: 26
+      spo2: "90% on 4L"
+    labs_abg:
+      k: 6.0
+      hco3: 16
+      ph: 7.28
+      bun: 88
+      creatinine: 4.0
+      lactate: 2.5
+    ekg: "Peaked T waves resolved; QRS normal post-therapy"
+    sofa: 8
+    trajectory: "Minimal urine output; crackles mid-lung"
+    icu_needs:
+      - "Dialysis readiness and K+ monitoring"
+      - "Possible NIPPV"
+    reversibility: "TLS often reversible with dialysis"
+
+  - patient_id: C2
+    severity: 3
+    group: 2
+    primary_cancer: "Metastatic pancreatic cancer"
+    presentation: "Intermediate-risk pulmonary embolism with RV strain"
+    vitals:
+      hr: 120
+      bp: "102/64"
+      map: 77
+      rr: 28
+      spo2: "92% on 6L"
+    labs_imaging:
+      troponin: "mildly elevated"
+      bnp: "elevated"
+      cta: "Lobar PE"
+      echo: "RV dilation, TAPSE low-normal"
+    sofa: 7
+    trajectory: "Escalating O2 needs over 3h; persistent chest pain"
+    icu_needs:
+      - "Anticoagulation infusion"
+      - "Rescue thrombolysis readiness"
+      - "Hemodynamic monitoring"
+    reversibility: "Good if prevents progression to shock"
+
+  - patient_id: D1
+    severity: 4
+    group: 1
+    primary_cancer: "Metastatic biliary tract cancer with cholangitis"
+    presentation: "Septic shock post-ERCP, persistent vasoplegia"
+    vitals:
+      hr: 128
+      bp: "78/46"
+      map: 57
+      rr: null
+      spo2: null
+      temp_c: 38.7
+    labs:
+      lactate: 5.5
+      tbili: 3.2
+      creatinine: 2.1
+      inr: 1.5
+    sofa: 11
+    trajectory: "On norepi 0.14 μg/kg/min + vasopressin 0.03 U/min → MAP 65–68"
+    icu_needs:
+      - "Dual pressors"
+      - "Arterial line"
+      - "Stress-dose steroids"
+    reversibility: "Source addressed; slow hemodynamic improvement"
+
+  - patient_id: D2
+    severity: 4
+    group: 2
+    primary_cancer: "Metastatic sarcoma with post-obstructive pneumonia"
+    presentation: "ARDS requiring intubation and moderate ventilatory support"
+    ventilation:
+      mode: "Vented"
+      pf_ratio: 120
+      fio2: 0.6
+      peep: 10
+      plateau_pressure: 28
+    vitals:
+      hr: 108
+      map: 72
+      norepinephrine: "0.04 μg/kg/min"
+    labs:
+      lactate: 2.9
+      creatinine: 1.3
+      platelets: 140
+    sofa: 10
+    trajectory: "Lung-protective settings tolerated over 4h"
+    icu_needs:
+      - "Mechanical ventilation and sedation"
+      - "Proning readiness"
+    reversibility: "Infectious process; potential improvement over days"
+
+  - patient_id: E1
+    severity: 5
+    group: 1
+    primary_cancer: "Metastatic renal cell carcinoma"
+    presentation: "Massive PE with peri-arrest; post-systemic tPA (45 min ago)"
+    vitals:
+      hr: 132
+      bp: "76/44"
+      map: 55
+      spo2: "90% on ventilator"
+    ventilation:
+      fio2: 0.8
+      peep: 12
+    pressors:
+      norepinephrine: "0.22 μg/kg/min"
+      vasopressin: "0.03 U/min"
+    labs_abg:
+      lactate: 6.3
+      ph: 7.24
+      creatinine: 1.8
+      hgb: 9.2
+      platelets: 160
+    sofa: 13
+    trajectory: "MAP rising to 62–65; echo shows improving RV strain"
+    icu_needs:
+      - "Post-tPA management"
+      - "Consider VA-ECMO consult"
+      - "High-dose pressor support"
+    reversibility: "Early recovery signals after thrombolysis"
+
+  - patient_id: E2
+    severity: 5
+    group: 2
+    primary_cancer: "Metastatic colorectal cancer with typhlitis"
+    presentation: "Neutropenic septic shock; intubated for encephalopathy"
+    vitals:
+      hr: 124
+      bp: "70/40"
+      map: 50
+      temp_c: 39.1
+    pressors:
+      norepinephrine: "0.25 μg/kg/min"
+      vasopressin: "0.03 U/min"
+    labs_abg:
+      lactate: 7.2
+      ph: 7.21
+      hco3: 14
+      creatinine: 2.4
+      tbili: 2.0
+      platelets: 38
+    sofa: 14
+    trajectory: "Lactate plateauing; minimal urine; starting stress steroids"
+    icu_needs:
+      - "Multi-pressor support"
+      - "Renal replacement therapy readiness"
+      - "Tight ventilation and sepsis bundle"
+    reversibility: "Possible if shock turns with ongoing resuscitation"

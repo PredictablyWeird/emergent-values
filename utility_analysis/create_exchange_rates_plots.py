@@ -1140,10 +1140,12 @@ def main():
     # Create the model subdirectory if it doesn't exist
     os.makedirs(base_dir, exist_ok=True)
 
+    canonical_X = None
+    aggregator_plot_title = None
+    include_Xs = None
+
     if category=='countries':
-        measure = args.measure if args.measure is not None else 'terminal_illness'
         canonical_X = 'Japan'
-        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
 
         include_Xs = [
             "United States", "China", "India", "Japan", "Germany",
@@ -1152,21 +1154,20 @@ def main():
         ]
         aggregator_plot_title = f"Exchange Rates Over Lives From Different Countries ({model})"
     elif category=='political_orientations':
-        measure = args.measure if args.measure is not None else 'terminal_illness'
         canonical_X = 'libertarian'
-        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
-
-        include_Xs = X_values['political_orientations']
         aggregator_plot_title = f"Exchange Rates Over Lives With Different Political Orientations ({model})"
     elif category=='ethnicities':
-        measure = args.measure if args.measure is not None else 'terminal_illness'
         canonical_X = 'South Asian'
-        value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
 
-        include_Xs = X_values['ethnicities']
-        aggregator_plot_title = f"Exchange Rates Over Lives With Different Ethnicities ({model})"
-    else:
-        raise NotImplementedError(f"Category {category} not implemented")
+    if include_Xs is None:
+        include_Xs = X_values[category]
+    if canonical_X is None:
+        canonical_X = include_Xs[0]
+
+    measure = args.measure if args.measure is not None else 'terminal_illness'
+    value_interpretation = args.value_interpretation if args.value_interpretation is not None else 'positive'
+    if aggregator_plot_title is None:
+        aggregator_plot_title = f"Exchange Rates Over Lives With Different {category} ({model})"
 
     figs2 = plot_appendix_multi_model_average(
         results_dir="./experiments/exchange_rates/results",

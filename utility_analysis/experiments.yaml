@@ -304,15 +304,23 @@ exchange_rates12:
   arguments:
     model_key: "<model_key>"
     create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+<<<<<<< HEAD
     create_agent_config_key: "default_with_reasoning"
     save_dir: "results/<model_key>"
     save_suffix: "<model_key>"
     with_reasoning: true
+=======
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+>>>>>>> origin/refactoring
     compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
     compute_utilities_config_key: "thurstonian_active_learning_k5"
     category: "gender"
     measure: "terminal_illness"
 
+<<<<<<< HEAD
 
 exchange_rates_reasoning_first:
   script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
@@ -328,6 +336,8 @@ exchange_rates_reasoning_first:
     compute_utilities_config_key: "thurstonian_active_learning_k5"
     create_agent_config_path: "../../compute_utilities/create_agent.yaml"
     create_agent_config_key: "default_with_reasoning"
+=======
+>>>>>>> origin/refactoring
 
 # ============= Expected Utility Experiments ============= #
 

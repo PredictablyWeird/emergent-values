@@ -7,6 +7,7 @@ import random
 import itertools
 import argparse
 import os
+import copy
 from collections import defaultdict
 import pandas as pd
 from sklearn.metrics import log_loss, accuracy_score
@@ -28,7 +29,7 @@ from .templates import comparison_prompt_template_default, comparison_prompt_tem
 from .models import UtilityModel
 import yaml
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 import importlib
 
 from .utility_models import (
@@ -81,7 +82,7 @@ class PreferenceGraph:
     Handles creation of training/holdout edge sets and sampling strategies.
     """
     
-    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42):
+    def __init__(self, options: List[Dict[str, Any]], holdout_fraction: float = 0.0, seed: int = 42, unique_fields: Optional[List[str]] = None):
         """
         Initialize a preference graph with training and holdout edge indices.
         
@@ -90,6 +91,10 @@ class PreferenceGraph:
                     {'id': str/int, 'description': str}
             holdout_fraction: Fraction of edges to hold out for evaluation
             seed: Random seed for reproducibility
+            unique_fields: Optional list of field names. If specified, edges will be excluded
+                    where both options have the same values for all specified fields.
+                    For example, if unique_fields=['patient_data'], then edges between
+                    options with the same patient_data will be excluded.
         """
         self.options = options
         self.option_id_to_idx = {option['id']: idx for idx, option in enumerate(options)}
@@ -97,6 +102,36 @@ class PreferenceGraph:
         
         # Generate all possible edge indices as tuples
         all_edge_indices = list(itertools.combinations([opt['id'] for opt in options], 2))
+        
+        # Filter out edges where both options have the same values for unique_fields
+        if unique_fields:
+            original_count = len(all_edge_indices)
+            filtered_edges = []
+            for A_id, B_id in all_edge_indices:
+                option_A = self.options_by_id[A_id]
+                option_B = self.options_by_id[B_id]
+                
+                # Check if all unique_fields are the same in both options
+                should_exclude = True
+                for field in unique_fields:
+                    if field not in option_A or field not in option_B:
+                        # If field is missing in either option, don't exclude
+                        should_exclude = False
+                        break
+                    
+                    # Compare field values (using == for equality, which works for dicts, lists, etc.)
+                    if option_A[field] != option_B[field]:
+                        # Fields differ, so don't exclude this edge
+                        should_exclude = False
+                        break
+                
+                if not should_exclude:
+                    filtered_edges.append((A_id, B_id))
+            
+            all_edge_indices = filtered_edges
+            filtered_count = original_count - len(all_edge_indices)
+            if filtered_count > 0:
+                print(f"Filtered out {filtered_count} edges where both options have the same values for fields: {unique_fields}")
         
         # Split into training and holdout indices
         random.seed(seed)
@@ -180,13 +215,15 @@ class PreferenceGraph:
             'holdout_edge_indices': [list(edge) for edge in self.holdout_edge_indices]
         }
     
-    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_template: str, include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
+    def generate_prompts(self, edge_indices: List[Tuple[Any, Any]], comparison_prompt_template: Union[str, Callable], include_flipped: bool = True) -> Tuple[List[Dict], List[str], Dict[int, Tuple]]:
         """
         Generate prompts for the given edge indices in both original and flipped ordering.
         
         Args:
             edge_indices: List of (option_A_id, option_B_id) tuples
-            comparison_prompt_template: Template string with {option_A} and {option_B} placeholders
+            comparison_prompt_template: Either:
+                - Template string with {option_A} and {option_B} placeholders, OR
+                - Callable function that takes (option_A_dict, option_B_dict, direction) and returns a prompt string
             include_flipped: Whether to include flipped prompts (Note: This should always be True; we only set it to False for demonstration purposes)
         Returns:
             Tuple containing:
@@ -224,7 +261,13 @@ class PreferenceGraph:
                     option1 = option_B['description']
                     option2 = option_A['description']
                 
-                prompt = comparison_prompt_template.format(option_A=option1, option_B=option2)
+                # Check if comparison_prompt_template is a callable function or a string template
+                if callable(comparison_prompt_template):
+                    # Pass full option dictionaries and direction to the function
+                    prompt = comparison_prompt_template(option_A, option_B, direction)
+                else:
+                    # Use string template formatting
+                    prompt = comparison_prompt_template.format(option_A=option1, option_B=option2)
                 
                 prompt_data = {
                     'prompt_idx': prompt_idx,
@@ -347,10 +390,11 @@ async def compute_utilities(
     compute_utilities_config_path: Optional[str] = None,
     compute_utilities_config_key: Optional[str] = None,
     system_message: Optional[str] = None,
-    comparison_prompt_template: Optional[str] = None,
+    comparison_prompt_template: Optional[Union[str, Callable]] = None,
     with_reasoning: Optional[bool] = None,
     save_dir: str = "results",
-    save_suffix: Optional[str] = None
+    save_suffix: Optional[str] = None,
+    unique_fields: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Compute utilities for a set of options using a specified utility model.
@@ -364,10 +408,13 @@ async def compute_utilities(
         compute_utilities_config_path: Path to compute_utilities.yaml
         compute_utilities_config_key: Key to use in compute_utilities.yaml
         system_message: Optional system message for the agent. If provided, overrides the value in compute_utilities.yaml
-        comparison_prompt_template: Optional template for comparison prompts. If provided, overrides the value in compute_utilities.yaml
+        comparison_prompt_template: Optional template for comparison prompts (string or callable). If provided, overrides the value in compute_utilities.yaml
         with_reasoning: Whether to use reasoning-based response parsing. If provided (True/False), overrides the config value
         save_dir: Directory to save results
         save_suffix: Suffix for saved files
+        unique_fields: Optional list of field names. If specified, edges will be excluded where both options
+                have the same values for all specified fields. For example, if unique_fields=['patient_data'],
+                then edges between options with the same patient_data will be excluded.
         
     Returns:
         Dictionary containing results data
@@ -411,7 +458,14 @@ async def compute_utilities(
     # Process options
     if isinstance(options_list, dict):
         options_list = flatten_hierarchical_options(options_list)
-    options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
+    
+    # Check if options_list is already a list of dictionaries with 'id' and 'description'
+    if options_list and isinstance(options_list[0], dict) and 'id' in options_list[0] and 'description' in options_list[0]:
+        # Options are already structured, use them as-is (preserving any additional fields)
+        options = options_list
+    else:
+        # Options are a list of strings, convert to structured format
+        options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
     
     # Get utility model class
     utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
@@ -446,10 +500,13 @@ async def compute_utilities(
     
     # Get preference graph arguments from config
     preference_graph_arguments = compute_utilities_config.get('preference_graph_arguments', {})
+    # Use unique_fields from parameter if provided, otherwise from config
+    unique_fields_param = unique_fields if unique_fields is not None else preference_graph_arguments.get('unique_fields', None)
     graph = PreferenceGraph(
         options=options,
         holdout_fraction=preference_graph_arguments.get('holdout_fraction', 0.0),
-        seed=preference_graph_arguments.get('holdout_seed', 42)
+        seed=preference_graph_arguments.get('holdout_seed', 42),
+        unique_fields=unique_fields_param
     )
     
     # Fit the model (this will populate training edges)
@@ -468,12 +525,22 @@ async def compute_utilities(
     )
     
     # Prepare results
+    # Create a serializable version of the config (convert callable to string)
+    serializable_config = copy.deepcopy(compute_utilities_config)
+    if 'compute_utilities_arguments' in serializable_config:
+        if 'comparison_prompt_template' in serializable_config['compute_utilities_arguments']:
+            template = serializable_config['compute_utilities_arguments']['comparison_prompt_template']
+            if callable(template):
+                # Replace callable with a string representation
+                func_name = getattr(template, '__name__', 'unknown')
+                serializable_config['compute_utilities_arguments']['comparison_prompt_template'] = f"<callable: {func_name}>"
+    
     results = {
         'options': options,
         'utilities': utilities,
         'metrics': metrics,  # Training metrics
         'holdout_metrics': holdout_metrics,  # Holdout metrics (if computed)
-        'compute_utilities_config': compute_utilities_config,
+        'compute_utilities_config': serializable_config,
         'graph_data': graph.export_data()  # Raw preference graph data
     }
     if create_agent_config_path is not None:
@@ -513,12 +580,85 @@ async def compute_utilities(
                 for k, v in holdout_metrics.items():
                     f.write(f"{k}: {v}\n")
             f.write("\nSorted utilities:\n")
+            # Create a function to format option representation
+            def format_option(opt):
+                """Format option representation, preferring factor fields if available."""
+                # Check if this is a medical triage option with patient_data
+                if 'patient_data' in opt and isinstance(opt['patient_data'], dict):
+                    patient_data = opt['patient_data']
+                    parts = []
+                    
+                    # Add severity and group if available
+                    if 'severity' in patient_data:
+                        parts.append(f"Severity={patient_data['severity']}")
+                    if 'group' in patient_data:
+                        parts.append(f"Group={patient_data['group']}")
+                    
+                    # Add factor fields if available (factors may be stored as a dict under 'factors' key)
+                    factor_fields = []
+                    if 'factors' in opt and isinstance(opt['factors'], dict):
+                        # Factors are stored as a dictionary
+                        for factor_name, factor_value in opt['factors'].items():
+                            factor_fields.append(f"{factor_name}={factor_value}")
+                    else:
+                        # Check for factor fields as top-level keys
+                        for key in opt.keys():
+                            if key not in ['id', 'description', 'patient_data', 'factors'] and not key.startswith('_'):
+                                # Check if it looks like a factor field (not a dict/list)
+                                if not isinstance(opt[key], (dict, list)):
+                                    factor_fields.append(f"{key}={opt[key]}")
+                    
+                    if factor_fields:
+                        parts.extend(factor_fields)
+                    
+                    if parts:
+                        return f"({', '.join(parts)})"
+                
+                # Fallback: check for common factor field patterns
+                factor_fields = []
+                # Check if factors are stored as a dictionary
+                if 'factors' in opt and isinstance(opt['factors'], dict):
+                    for factor_name, factor_value in opt['factors'].items():
+                        factor_fields.append(f"{factor_name}={factor_value}")
+                else:
+                    # Check for factor fields as top-level keys
+                    for key in opt.keys():
+                        if key not in ['id', 'description', 'factors'] and not key.startswith('_'):
+                            # Check if it looks like a factor field (not a dict/list)
+                            if not isinstance(opt[key], (dict, list)):
+                                factor_fields.append(f"{key}={opt[key]}")
+                
+                if factor_fields:
+                    return f"({', '.join(factor_fields)})"
+                else:
+                    return opt['description']
+            
             sorted_utils = sorted(
-                [(opt['description'], utilities[opt['id']]) for opt in options],
+                [(format_option(opt), utilities[opt['id']]) for opt in options],
                 key=lambda x: x[1]['mean'],
                 reverse=True
             )
-            for desc, util in sorted_utils:
-                f.write(f"{desc}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+            for opt_repr, util in sorted_utils:
+                f.write(f"{opt_repr}: mean={util['mean']:.4f}, variance={util['variance']:.4f}\n")
+    
+    # Ensure all async tasks are completed before returning
+    # This prevents the script from hanging due to pending tasks
+    loop = asyncio.get_event_loop()
+    current_task = asyncio.current_task(loop)
+    pending = [task for task in asyncio.all_tasks(loop) if task is not current_task and not task.done()]
+    if pending:
+        # Wait for all pending tasks to complete (with a timeout)
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=1.0)
+        except asyncio.TimeoutError:
+            # If tasks don't complete quickly, cancel them
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            # Wait a bit for cancellation to propagate
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except Exception:
+                pass  # Ignore exceptions from cancelled tasks
                 
     return results

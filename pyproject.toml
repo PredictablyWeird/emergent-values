@@ -15,6 +15,7 @@ dependencies = [
     "inflect>=7.5.0",
     "ipykernel>=7.1.0",
     "litellm>=1.61.5",
+    "marimo[recommended]>=0.18.0",
     "matplotlib>=3.10.7",
     "networkx>=3.3",
     "numpy>=1.26.0,<2.0.0",
