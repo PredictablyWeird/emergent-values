@@ -3,13 +3,14 @@
 import asyncio
 import json
 import os
+import pdb
 import time
 import yaml
 import numpy as np
 import random
 from typing import List, Dict, Any, Optional, Union, Callable
 from pathlib import Path
-from .llm_agent import BaseAgent, LiteLLMAgent, HuggingFaceAgent, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
+from .llm_agent import BaseAgent, LiteLLMAgent, HuggingFaceAgent, OpenAIAgent, OpenAIAgentReasoning, vLLMAgent, vLLMAgentBaseModel, HuggingFaceAgentLogitsPrediction
 import re
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -140,9 +141,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
     extra_body = model_config.get('extra_body', None)  # Read extra_body from model config (for reasoning, etc.)
+    reasoning_effort = model_config.get('reasoning_effort', None)  # For OpenAI reasoning models (o1, gpt-5)
+    text_verbosity = model_config.get('text_verbosity', None)  # For OpenAI reasoning models (o1, gpt-5)
     
     # Get API key from environment variables
-
 
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai', 'openrouter']:
         api_key_map = {
@@ -154,9 +156,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             'openrouter': 'OPENROUTER_API_KEY'
         }
         env_var_name = api_key_map[model_type]
-        api_key = os.getenv(env_var_name)
-        if api_key is None:
+        if (api_key := os.getenv(env_var_name)) is None:    
             raise ValueError(f"No API key found for {model_type}. Please add {env_var_name} to your .env file.")
+
+
         return LiteLLMAgent(
             model=model_name,
             temperature=temperature,
@@ -165,7 +168,19 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             accepts_system_message=accepts_system_message,
             base_timeout=kwargs.get('base_timeout', 5),
             extra_body=extra_body,
+            reasoning_effort=reasoning_effort,
+            text_verbosity=text_verbosity,
         )
+    elif model_type == 'openai_reasoning' or model_type == 'openrouter_reasoning':
+            print(f"Using OpenAI agent for model {model_name} with reasoning effort = {reasoning_effort} and text verbosity = {text_verbosity}  ")
+            return OpenAIAgentReasoning(model=model_name, 
+            temperature=temperature, 
+            max_tokens=max_tokens, 
+            concurrency_limit=concurrency_limit,
+            timeout=kwargs.get('base_timeout', 5), 
+            reasoning_effort=reasoning_effort, 
+            text_verbosity=text_verbosity)
+
     elif model_type.startswith("base_"):
         if model_type.endswith("openrouter"):
             base_url="https://openrouter.ai/api/v1"
@@ -187,11 +202,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             base_timeout=kwargs.get('base_timeout', 5),
             extra_body=extra_body,
         )
-
-
-
         
-
     elif model_type == 'huggingface':
         return HuggingFaceAgent(
             model=model_config['path'],
@@ -227,7 +238,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
 # ========================== GENERATE AND PARSE RESPONSES ========================== #
 def parse_responses_forced_choice(
     raw_results,
-    with_reasoning=False,
+    with_reasoning='NO_REASONING',
     choices=['A', 'B'],
     verbose=True
 ):
@@ -236,20 +247,22 @@ def parse_responses_forced_choice(
     for a forced choice task.
 
     :param raw_results:     dict of {prompt_idx: [raw_response_1, raw_response_2, ...]}
-    :param with_reasoning:  if True, parse based on "Answer: X" or "Answer: Y" in text
+    :param with_reasoning:  if 'NO_REASONING', 'REASONING_BEFORE', or 'REASONING_AFTER',  parse based on "Answer: X" and collect reasoning
     :param choices:         a list of two distinct single characters (e.g., ['A','B'])
     :param verbose:         if True, prints counts of longer_than_expected and unparseable
 
-    Returns a dictionary in the same shape, but with each response parsed as:
-        {prompt_idx: ['A', 'B', 'unparseable', ...]}
+    Returns a tuple of (parsed_results, reasoning_results) where:
+        parsed_results: {prompt_idx: ['A', 'B', 'unparseable', ...]}
+        reasoning_results: {prompt_idx: [reasoning_text_1, reasoning_text_2, ...]} (only when with_reasoning is set)
     Also prints counts for longer_than_expected and unparseable responses.
     """
     parsed_results = {}
+    reasoning_results = {}
+    reasoning_summaries = {}
     counts = {
         'longer_than_expected': 0,
         'unparseable': 0
     }
-
     # Ensure we have exactly 2 distinct single-character choices
     assert len(choices) == 2, "choices must be a list of two distinct characters."
     assert len(choices[0]) == 1 and len(choices[1]) == 1, (
@@ -262,7 +275,10 @@ def parse_responses_forced_choice(
     # Precompile the regex pattern for reasoning mode (case-insensitive).
     # Example: if choices = ['X','Y'], pattern = r'Answer:\s*([X|Y])'
     pattern_str = '|'.join(re.escape(c) for c in choices)
-    reasoning_pattern = re.compile(rf'Answer:\s*({pattern_str})', re.IGNORECASE)
+    reasoning_before_pattern = re.compile(rf'Answer:\s*({pattern_str})', re.IGNORECASE)
+    # Pattern to extract answer and everything after it for REASONING_AFTER
+    # Group 1: the choice (A or B), Group 2: everything after "Answer: X"
+    reasoning_after_pattern = re.compile(rf'Answer:\s*({pattern_str})\s*(.*)', re.DOTALL | re.IGNORECASE)
 
     # Precompile patterns for non-reasoning mode
     choice_patterns = [re.compile(rf'(?:^|[^\w])({re.escape(c)})(?:[^\w]|$)') for c in choices]
@@ -271,36 +287,61 @@ def parse_responses_forced_choice(
         if responses is None:
             # e.g., if we exceeded max retries or got timeouts for all
             parsed_results[prompt_idx] = []
+            if with_reasoning in ['REASONING_BEFORE', 'REASONING_AFTER']:
+                reasoning_results[prompt_idx] = []
             continue
 
         parsed_list = []
-        for response in responses:
+        reasoning_list = []
+        reasoning_summary_list = []
+        for response, reasoning_summary in responses:
             # If a single response is None (e.g., final timeout), parse as 'unparseable'.
             if response is None:
                 parsed_list.append('unparseable')
+                if with_reasoning in ['REASONING_BEFORE', 'REASONING_AFTER']:
+                    reasoning_list.append('unparseable')
+                    reasoning_summary_list.append('unparseable')
                 counts['unparseable'] += 1
                 continue
-
-            if with_reasoning:
-                # Reasoning mode: must find "Answer: X" or "Answer: Y".
-                answer_match = reasoning_pattern.search(response)
+                       
+            
+            if with_reasoning == 'REASONING_BEFORE':
+                # Reasoning mode: reasoning comes before "Answer: X"
+                # Extract everything before "Answer: X" as reasoning
+                answer_match = reasoning_before_pattern.search(response)
                 if answer_match:
                     matched = answer_match.group(1)
-                    # Normalize the matched choice by matching it to one of choices[0] or choices[1].
-                    if matched.upper() == choices[0].upper():
-                        parsed_list.append(choices[0])
-                    elif matched.upper() == choices[1].upper():
-                        parsed_list.append(choices[1])
-                    else:
-                        counts['unparseable'] += 1
-                        parsed_list.append('unparseable')
+                    # Extract reasoning text (everything before "Answer:")
+                    answer_start = answer_match.start()
+                    reasoning_text = response[:answer_start].strip()
+                    parsed_list.append(matched)
+                    reasoning_list.append(reasoning_text if reasoning_text else 'unparseable')
+                    reasoning_summary_list.append(reasoning_summary)
                 else:
-                    counts['unparseable'] += 1
                     parsed_list.append('unparseable')
+                    reasoning_list.append('unparseable')
+                    reasoning_summary_list.append('unparseable')
+                    counts['unparseable'] += 1
+            elif with_reasoning == 'REASONING_AFTER':
+                # Reasoning mode: "Answer: X" comes first, then everything after it is reasoning
+                # Pattern extracts: Answer: X [everything after]
+                answer_match = reasoning_after_pattern.search(response)
+                if answer_match:
+                    matched = answer_match.group(1)  # The choice (A or B)
+                    reasoning_text = answer_match.group(2).strip()  # Everything after "Answer: X"
+                    parsed_list.append(matched)
+                    reasoning_list.append(reasoning_text if reasoning_text else 'unparseable')
+                    reasoning_summary_list.append(reasoning_summary)
+                else:
+                    parsed_list.append('unparseable')
+                    reasoning_list.append('unparseable')
+                    reasoning_summary_list.append('unparseable')
+                    counts['unparseable'] += 1
             else:
                 # Non-reasoning mode
                 # First check if response is exactly one of the choices
                 response = response.strip()
+                reasoning_summary_list.append(reasoning_summary)
                 if response == choices[0]:
                     parsed_list.append(choices[0])
                 elif response == choices[1]:
@@ -324,14 +365,17 @@ def parse_responses_forced_choice(
                             decision = str(parsed_json['decision']).strip().upper()
                             if decision == choices[0].upper():
                                 parsed_list.append(choices[0])
+                                reasoning_summary_list.append(reasoning_summary)
                                 json_parsed = True
                             elif decision == choices[1].upper():
                                 parsed_list.append(choices[1])
+                                reasoning_summary_list.append(reasoning_summary)
                                 json_parsed = True
                             else:
                                 # JSON found but decision field doesn't match choices
                                 counts['unparseable'] += 1
                                 parsed_list.append('unparseable')
+                                reasoning_summary_list.append('unparseable')
                                 json_parsed = True  # Still counted as JSON, just invalid
                     except (json.JSONDecodeError, ValueError, AttributeError):
                         # Not JSON or JSON parsing failed, will fall back to pattern matching
@@ -349,14 +393,16 @@ def parse_responses_forced_choice(
                         else:  # Neither or both choices appear with space/newline before them
                             counts['unparseable'] += 1
                             parsed_list.append('unparseable')
+                            reasoning_summary_list.append('unparseable')
 
         parsed_results[prompt_idx] = parsed_list
-
+        reasoning_results[prompt_idx] = reasoning_list
+        reasoning_summaries[prompt_idx] = reasoning_summary_list
     if verbose:
         print(f"Number of responses longer than expected: {counts['longer_than_expected']}")
         print(f"Number of unparseable responses: {counts['unparseable']}")
 
-    return parsed_results
+    return parsed_results, reasoning_results, reasoning_summaries
 
 
 async def parse_responses_forced_choice_freeform(
@@ -615,6 +661,13 @@ async def generate_responses(agent, prompts, system_message=None, K=10, timeout=
     
     if isinstance(agent, LiteLLMAgent) or isinstance(agent, BaseAgent):
         responses = await agent.async_completions(messages_k, base_timeout=timeout, verbose=verbose)
+    elif isinstance(agent, OpenAIAgentReasoning) or isinstance(agent, OpenAIAgent):
+        print(f"sending messages to openai reasoning agent: len(messages_k): {len(messages_k)}")
+        # print(f"messages_k: {messages_k[0]}")
+        responses = await agent.async_completions(messages_k)
+        # print(f"responses: {responses}")
+        # pdb.set_trace()
+
     else:
         responses = agent.completions_batch(messages_k)
     
@@ -671,12 +724,14 @@ async def evaluate_holdout_set(
     )
     
     # Parse responses and process them into preference data
-    parsed_responses = parse_responses_forced_choice(holdout_responses, with_reasoning=with_reasoning)
+    parse_result, reasoning_results, reasoning_summaries = parse_responses_forced_choice(holdout_responses, with_reasoning=with_reasoning)
     processed_preference_data = utility_model.process_responses(
         graph=graph,
         responses=holdout_responses,
-        parsed_responses=parsed_responses,
-        prompt_idx_to_key=holdout_prompt_idx_to_key
+        parsed_responses=parse_result,
+        prompt_idx_to_key=holdout_prompt_idx_to_key,
+        reasoning_results=reasoning_results,
+        reasoning_summaries=reasoning_summaries
     )
     
     # Add edges to graph

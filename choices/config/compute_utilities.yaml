@@ -95,7 +95,7 @@ minimal_debug:
   utility_model_class: "ThurstonianActiveLearningUtilityModel"
   utility_model_arguments:
     unparseable_mode: "distribution"
-    num_epochs: 100
+    num_epochs: 10
     learning_rate: 0.01
     edge_multiplier: 2
     degree: 2

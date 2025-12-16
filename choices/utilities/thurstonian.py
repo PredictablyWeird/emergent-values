@@ -5,6 +5,7 @@ Combines Thurstonian preference modeling with active learning for efficient
 utility elicitation.
 """
 
+import pdb
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -382,7 +383,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
         unparseable_mode: str,
         comparison_prompt_generator: Callable[[Dict[str, Any], Dict[str, Any]], str],
         system_message: str,
-        with_reasoning: bool,
+        with_reasoning: str,
         num_epochs: int = 1000,
         learning_rate: float = 0.01,
         edge_multiplier: float = 2.0,
@@ -404,7 +405,7 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             unparseable_mode: How to handle unparseable responses
             comparison_prompt_generator: Callable function that takes (option_A_dict, option_B_dict) and returns a prompt string
             system_message: System message for agents that accept a system message
-            with_reasoning: Whether to use response parsing
+            with_reasoning: Whether to use response parsing (options: 'REASONING_BEFORE', 'REASONING_AFTER', 'NO_REASONING')
             num_epochs: Number of epochs for optimization
             learning_rate: Learning rate for optimization
             edge_multiplier: Multiplier for number of edges
@@ -503,13 +504,15 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             system_message=self.system_message,
             K=self.K
         )
-        
-        parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+
+        parsed_responses, reasoning_results, reasoning_summaries = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
         processed_preference_data = self.process_responses(
             graph=graph,
             responses=responses,
             parsed_responses=parsed_responses,
-            prompt_idx_to_key=prompt_idx_to_key
+            prompt_idx_to_key=prompt_idx_to_key,
+            reasoning_results=reasoning_results,
+            reasoning_summaries=reasoning_summaries
         )
         
         graph.add_edges(processed_preference_data)
@@ -561,12 +564,14 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
                 K=self.K
             )
             
-            parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+            parsed_responses, reasoning_results, reasoning_summaries = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
             processed_preference_data = self.process_responses(
                 graph=graph,
                 responses=responses,
                 parsed_responses=parsed_responses,
-                prompt_idx_to_key=prompt_idx_to_key
+                prompt_idx_to_key=prompt_idx_to_key,
+                reasoning_results=reasoning_results,
+                reasoning_summaries=reasoning_summaries
             )
             
             graph.add_edges(processed_preference_data)

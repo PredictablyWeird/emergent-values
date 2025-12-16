@@ -9,6 +9,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "accelerate>=1.1.1",
     "anthropic>=0.45.2",
+    "autopep8>=2.3.2",
     "fireworks-ai>=0.15.8",
     "google-generativeai>=0.8.0",
     "huggingface-hub>=0.26.2",
@@ -37,6 +38,11 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["utility_analysis"]
+
+[tool.uv.workspace]
+members = [
+    "choices/notebooks",
+]
 
 [build-system]
 requires = ["hatchling"]

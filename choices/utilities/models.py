@@ -86,6 +86,8 @@ class UtilityModel(ABC):
         responses: Dict[int, List[str]],
         parsed_responses: Dict[int, List[str]],
         prompt_idx_to_key: Dict[int, Tuple[Any, Any, str]],
+        reasoning_results: Optional[Dict[int, List[Optional[str]]]] = None,
+        reasoning_summaries: Optional[Dict[int, List[Optional[str]]]] = None,
     ) -> List[Dict]:
         """
         Convert raw responses into probabilities of preferring A over B.
@@ -115,7 +117,8 @@ class UtilityModel(ABC):
         for prompt_idx, response_list in responses.items():
             A_id, B_id, direction = prompt_idx_to_key[prompt_idx]
             parsed_list = parsed_responses[prompt_idx]  # The K parsed responses
-
+            reasoning_list = reasoning_results.get(prompt_idx, []) if reasoning_results else []
+            reasoning_summary_list = reasoning_summaries.get(prompt_idx, []) if reasoning_summaries else []
             # Use the orientation as-is (A_id, B_id)
             pair_key = (A_id, B_id)
             if pair_key not in pair_data:
@@ -125,16 +128,27 @@ class UtilityModel(ABC):
                     'original_responses': [],
                     'flipped_responses': [],
                     'original_parsed': [],
-                    'flipped_parsed': []
+                    'flipped_parsed': [],
+                    'original_reasoning': [],
+                    'flipped_reasoning': [],
+                    'original_reasoning_summaries': [],
+                    'flipped_reasoning_summaries': []
+
                 }
 
             # We store the raw and parsed responses in separate buckets
             if direction == 'original':
                 pair_data[pair_key]['original_responses'].extend(response_list)
                 pair_data[pair_key]['original_parsed'].extend(parsed_list)
+                pair_data[pair_key]['original_reasoning_summaries'].extend(reasoning_summary_list)
+                if reasoning_list:
+                    pair_data[pair_key]['original_reasoning'].extend(reasoning_list)
             else:  # 'flipped'
                 pair_data[pair_key]['flipped_responses'].extend(response_list)
                 pair_data[pair_key]['flipped_parsed'].extend(parsed_list)
+                pair_data[pair_key]['flipped_reasoning_summaries'].extend(reasoning_summary_list)
+                if reasoning_list:
+                    pair_data[pair_key]['flipped_reasoning'].extend(reasoning_list)
 
         # Now, we convert each pair's responses into a probability P(A)
         preference_data = []
@@ -201,20 +215,32 @@ class UtilityModel(ABC):
 
             if total_responses > 0:
                 probability_A = total_A / (total_A + total_B)  # or total_A / total_responses if we interpret it differently
+                aux_data = {
+                    'count_A': total_A,  # This might be fractional now
+                    'count_B': total_B,  # Also might be fractional
+                    'total_responses': total_responses,
+                    'original_responses': data['original_responses'],
+                    'flipped_responses': data['flipped_responses'],
+                    'original_parsed': data['original_parsed'],
+                    'flipped_parsed': data['flipped_parsed'],
+                    'original_reasoning_summaries': data['original_reasoning_summaries'],
+                    'flipped_reasoning_summaries': data['flipped_reasoning_summaries'],
+                    'unparseable_mode': self.unparseable_mode
+                }
+                # Add reasoning if available
+                if 'original_reasoning' in data and data['original_reasoning']:
+                    aux_data['original_reasoning'] = data['original_reasoning']
+                if 'flipped_reasoning' in data and data['flipped_reasoning']:
+                    aux_data['flipped_reasoning'] = data['flipped_reasoning']
+                if 'original_reasoning_summaries' in data and data['original_reasoning_summaries']:
+                    aux_data['original_reasoning_summaries'] = data['original_reasoning_summaries']
+                if 'flipped_reasoning_summaries' in data and data['flipped_reasoning_summaries']:
+                    aux_data['flipped_reasoning_summaries'] = data['flipped_reasoning_summaries']
                 entry = {
                     'option_A': data['option_A'],
                     'option_B': data['option_B'],
                     'probability_A': probability_A,
-                    'aux_data': {
-                        'count_A': total_A,  # This might be fractional now
-                        'count_B': total_B,  # Also might be fractional
-                        'total_responses': total_responses,
-                        'original_responses': data['original_responses'],
-                        'flipped_responses': data['flipped_responses'],
-                        'original_parsed': data['original_parsed'],
-                        'flipped_parsed': data['flipped_parsed'],
-                        'unparseable_mode': self.unparseable_mode
-                    }
+                    'aux_data': aux_data
                 }
                 preference_data.append(entry)
             else:

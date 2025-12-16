@@ -1,5 +1,6 @@
 import os
 import json
+import pdb
 import random
 import string
 import time
@@ -37,8 +38,6 @@ load_dotenv()
 def get_llm_agent_class(model: str):
     if "gpt" in model:
         return OpenAIAgent
-    elif "o1" in model:
-        return O1OpenAIAgent
     elif "claude" in model:
         return AnthropicAgent
     elif "gemini" in model:
@@ -118,7 +117,7 @@ class LLMAgent(ABC):
             return response
         except Exception as e:
             raise Exception(f"Exception: {str(e)}")
-        
+
 class OpenAIAgent(LLMAgent):
     def __init__(self, temperature: float = 0.0, max_tokens: int = 2048, model: str = "gpt-4o-mini", concurrency_limit: int = 100):
         super().__init__(temperature, max_tokens)
@@ -127,7 +126,7 @@ class OpenAIAgent(LLMAgent):
         self.client = openai.OpenAI(api_key=openai_api_key)
         self.async_client = openai.AsyncOpenAI(api_key=openai_api_key)
         self.completions_kwargs = {
-            "max_tokens": self.max_tokens,
+            # "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }
         self.concurrency_limit = concurrency_limit
@@ -147,6 +146,7 @@ class OpenAIAgent(LLMAgent):
     def _completions(self, messages: List[Dict]) -> str:
         messages = self._preprocess_messages(messages)
         response = self.client.chat.completions.create(
+
             model=self.model,
             messages=messages,
             **self.completions
@@ -282,7 +282,7 @@ class OpenAIAgent(LLMAgent):
 
         return [results[i] for i in range(len(messages))]
 
-    
+
     async def _completions_stream(self, messages: List):
         # messages = self.system + messages
         stream = self.client.chat.completions.create(
@@ -296,6 +296,152 @@ class OpenAIAgent(LLMAgent):
             if (text := chunk.choices[0].delta.content) is not None:
                 yield text
 
+
+class OpenAIAgentReasoning(OpenAIAgent):
+    def __init__(self, temperature: float = 0.0, max_tokens: int = 2048, model: str = "gpt-5", 
+    concurrency_limit: int = 100,  timeout: int = 5, reasoning_effort: Optional[str] = None, text_verbosity: Optional[str] = None):
+        super().__init__(temperature, max_tokens)
+        self.model = model
+        self.max_tokens = max_tokens
+        if model in ["gpt-5", "o1", "o1-mini"]:
+            base_url = "https://api.openai.com/v1"
+            api_key= os.getenv("OPENAI_API_KEY")
+        else:
+            base_url = "https://openrouter.ai/api/v1"
+            api_key = os.getenv("OPENROUTER_API_KEY")
+        self.async_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self.concurrency_limit = concurrency_limit
+        self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
+        self.max_retries = 5
+        self.use_jitter = True
+        self.max_delay = 10.0
+        self.base_delay = 1.0
+        self.openai_reasoning_models = ["gpt-5", "o1", "o1-mini"]
+        self.openrouter_reasoning_models = ["deepseek-v3.2"]
+
+    async def async_completions(
+        self,
+        messages: List[List[Dict]],
+        verbose: bool = True,
+        **kwargs
+    ) -> List[str]:
+        """
+        Returns a list of LLM responses, in order.
+        Uses a semaphore to limit concurrency, and tqdm_asyncio for progress.
+        """
+
+        semaphore = asyncio.Semaphore(self.concurrency_limit)
+        counts = {"timeouts": 0, "errors": 0}
+        results = {}
+
+        async def process_message(message_idx: int):
+            """
+            Attempts to process a single message up to `max_retries` times.
+            On generic exceptions, sleeps with exponential backoff and optional jitter.
+            On timeout, doubles the request timeout without sleeping.
+            """
+            message = messages[message_idx]
+            retry_delay = 2.0
+            response = None
+            reasoning_summary = None
+
+            for attempt in range(self.max_retries):
+                # Acquire the semaphore before making the LLM call
+                async with semaphore:
+                    try:
+                        completion_kwargs = {
+                            "temperature": self.temperature,
+                            "max_output_tokens": self.max_tokens,
+                        }
+                        # Add reasoning_effort and text_verbosity for OpenAI reasoning models (o1, gpt-5)
+                        if self.reasoning_effort:
+                            completion_kwargs["reasoning"] = self.reasoning_effort
+                        if self.text_verbosity:
+                            completion_kwargs["text"] = self.text_verbosity
+                        print(f"Making request for message {message_idx}")
+                        completion_res = await self.async_client.responses.create(model=self.model, 
+                                                                                instructions=message[0]['content'],
+                                                                                input=message[1]['content'], **completion_kwargs)
+                        print(f"Request for message {message_idx} completed")
+                    except asyncio.TimeoutError:
+                        counts["timeouts"] += 1
+
+                        if verbose:
+                            print(
+                                f"[Timeout] Attempt {attempt+1}/{self.max_retries} "
+                                f"for message index {message_idx}. Timed out after {current_timeout:.1f}s."
+                            )
+                        if attempt == self.max_retries - 1:
+                            response = None  # no more retries
+                            if verbose:
+                                print(f"Max retries (timeouts) reached for message index {message_idx}.")
+                        else:
+                            current_timeout *= 2.0
+
+                        continue  # next attempt
+
+                    except Exception as e:
+                        counts["errors"] += 1
+
+                        if verbose:
+                            print(
+                                f"[Error] Attempt {attempt+1}/{self.max_retries} "
+                                f"for message index {message_idx}: {e}"
+                            )
+                        if attempt == self.max_retries - 1:
+                            response = None
+                            if verbose:
+                                print(f"Max retries (errors) reached for message index {message_idx}.")
+                        else:
+                            # Sleep with exponential backoff
+                            sleep_for = retry_delay
+                            if self.use_jitter:
+                                sleep_for += random.uniform(0, 1)
+                            if verbose:
+                                print(f"Sleeping {sleep_for:.1f}s before retry (error backoff)...")
+                            await asyncio.sleep(sleep_for)
+                            retry_delay = min(retry_delay * 2.0, self.max_delay)
+
+                        continue  # next attempt
+
+                    # Success: parse the response
+                    response = completion_res.output_text
+                    # Access the reasoning summary if available
+                    for out in completion_res.output:
+                        if out.type == 'reasoning':
+                            model_name = self.model.split('/')[-1]
+                            if model_name in self.openai_reasoning_models:
+                                if len(out.summary) > 0:
+                                    reasoning_summary = out.summary[0].text
+                                else:
+                                    reasoning_summary = None
+                            elif model_name in self.openrouter_reasoning_models:
+                                if len(out.content):
+                                    reasoning_summary = out.content[0].text
+                            else:
+                                reasoning_summary = None
+            results[message_idx] = (response, reasoning_summary)
+        # Create a task for each message
+        tasks = [process_message(i) for i in range(len(messages))]
+
+        # Use tqdm_asyncio to track progress as tasks finish
+        # You can also set `leave=False` or other tqdm arguments as needed
+        coro_count = 0
+        for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="LLM calls"):
+            print(f"Waiting for message {coro_count}")
+            await coro
+            print(f"Completed message {coro_count}")
+            coro_count += 1
+
+
+        return [results[i] for i in range(len(messages))]
+
+
+
+
+
+    
 class GrokAgent(OpenAIAgent):
     def __init__(self, model: str, temperature: float = 0.0, max_tokens: int = 2048):
         super().__init__(temperature, max_tokens)
@@ -304,16 +450,6 @@ class GrokAgent(OpenAIAgent):
         self.client = openai.OpenAI(api_key=grok_api_key, base_url="https://api.x.ai/v1")
         self.async_client = openai.AsyncOpenAI(api_key=grok_api_key)
 
-class O1OpenAIAgent(OpenAIAgent):
-    def __init__(self,  model: str = "o1-mini", max_tokens: int = 2048, **kwargs):
-        super().__init__(max_tokens=max_tokens)
-        self.model = model
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.client = openai.OpenAI(api_key=openai_api_key)
-        self.async_client = openai.AsyncOpenAI(api_key=openai_api_key)
-        self.completions_kwargs = {
-            "max_completion_tokens": self.max_tokens,
-        }
 
 class FireworksAgent(OpenAIAgent):
     def __init__(self, model: str, temperature: float = 0.0, max_tokens: int = 2048):
@@ -962,7 +1098,9 @@ class LiteLLMAgent:
         base_delay: float = 1.0,
         max_delay: float = 10.0,
         use_jitter: bool = True,
-        extra_body: Optional[Dict] = None
+        extra_body: Optional[Dict] = None,
+        reasoning_effort: Optional[str] = None,
+        text_verbosity: Optional[str] = None
     ):
         self.model = model
         self.temperature = temperature
@@ -970,6 +1108,8 @@ class LiteLLMAgent:
         self.concurrency_limit = concurrency_limit
         self.accepts_system_message = accepts_system_message
         self.extra_body = extra_body
+        self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
 
         self.max_retries = max_retries
         self.base_timeout = base_timeout
@@ -1021,6 +1161,11 @@ class LiteLLMAgent:
                             "temperature": self.temperature,
                             "timeout": current_timeout
                         }
+                        # Add reasoning_effort and text_verbosity for OpenAI reasoning models (o1, gpt-5)
+                        if self.reasoning_effort:
+                            completion_kwargs["reasoning"] = self.reasoning_effort
+                        if self.text_verbosity:
+                            completion_kwargs["text"] = self.text_verbosity
                         # Add extra_body if it exists (for OpenRouter reasoning parameter, etc.)
                         if self.extra_body:
                             completion_kwargs["extra_body"] = self.extra_body
