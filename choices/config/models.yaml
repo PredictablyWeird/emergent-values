@@ -2,23 +2,6 @@
 # Reasoning Models
 # ------------------------------
 
-# DeepSeek V3.2 with reasoning disabled
-deepseek-3-2:
-  model_name: "openrouter/deepseek/deepseek-v3.2-exp"
-  model_type: openrouter
-  extra_body:
-    reasoning:
-      enabled: false
-
-# DeepSeek V3.2 with reasoning enabled
-# (This requires increasing max_tokens to a few hundred)
-deepseek-3-2-reasoning:
-  model_name: "openrouter/deepseek/deepseek-v3.2-exp"
-  model_type: openrouter
-  extra_body:
-    reasoning:
-      enabled: true
-
 claude-sonnet-4-5:
   model_name: "openrouter/anthropic/claude-sonnet-4.5"
   model_type: openrouter
@@ -72,6 +55,28 @@ gpt-5-mini:
   model_type: openai
 
 
+gpt-5:
+  model_name: "gpt-5"
+  model_type: openai_reasoning # use this type for gpt-5 reasoning models that can provide reasoning summary
+  reasoning_effort: 
+      effort: "low"
+      summary: "detailed"
+  text_verbosity:
+    verbosity: "low" # Options: "low", "medium", "high"
+
+deepseek-v3-2-reasoning:
+  model_name: "deepseek/deepseek-v3.2"
+  model_type: openrouter_reasoning #
+  reasoning_effort:
+    enabled: true
+
+deepseek-v3-2-non-reasoning:
+  model_name: "deepseek/deepseek-v3.2"
+  model_type: openrouter_reasoning #
+  reasoning_effort:
+    enabled: false
+  text_verbosity:
+    verbosity: "low" # Options: "low", "medium", "high"
 # ------------------------------
 # Anthropic
 # ------------------------------

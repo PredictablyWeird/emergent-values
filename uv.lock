@@ -13,12 +13,6 @@ resolution-markers = [
     "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 
-[manifest]
-members = [
-    "emergent-values",
-    "notebooks",
-]
-
 [[package]]
 name = "accelerate"
 version = "1.11.0"
@@ -2789,17 +2783,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/29/45/c0adfbfb0b5895aa18cec400c535b4f7ff3e52536e0403602fc1a23f7de9/ninja-1.13.0-py3-none-win_amd64.whl", hash = "sha256:fb8ee8719f8af47fed145cced4a85f0755dd55d45b2bddaf7431fa89803c5f3e", size = 309975, upload-time = "2025-08-11T15:10:16.697Z" },
     { url = "https://files.pythonhosted.org/packages/df/93/a7b983643d1253bb223234b5b226e69de6cda02b76cdca7770f684b795f5/ninja-1.13.0-py3-none-win_arm64.whl", hash = "sha256:3c0b40b1f0bba764644385319028650087b4c1b18cdfa6f45cb39a3669b81aa9", size = 290806, upload-time = "2025-08-11T15:10:18.018Z" },
 ]
-
-[[package]]
-name = "notebooks"
-version = "0.1.0"
-source = { virtual = "choices/notebooks" }
-dependencies = [
-    { name = "litellm" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "litellm", specifier = ">=1.78.6" }]
 
 [[package]]
 name = "numba"
