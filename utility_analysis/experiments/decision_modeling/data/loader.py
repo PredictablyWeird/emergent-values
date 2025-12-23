@@ -89,7 +89,7 @@ def load_decision_file(
     """
     results_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        '..', '..', '..', 'exchange_rates', 'results', model_name, category, measure
+        '..', '..', 'exchange_rates', 'results', model_name, category, measure
     )
     results_dir = os.path.normpath(results_dir)
     
